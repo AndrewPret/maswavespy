@@ -264,6 +264,113 @@ class ElementDC():
         fig.set_tight_layout(tight_layout)
 
 
+    def plot_dispersion_image_ZET(self, f_min, f_max, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, tight_layout=True):
+    
+        """           
+        Plot the two-dimensional dispersion image (phase velocity spectrum) 
+        of the recorded seismic wavefield. The slant-stacked amplitude (A) 
+        is presented in the frequency - phase velocity - normalized amplitude 
+        domain using a color scale.   
+        
+        Parameters
+        ----------
+        f_min : int or float
+            Lower limit of frequency axis [Hz].
+        f_max : int or float
+            Upper limit of frequency axis [Hz].
+        col_map : str or Colormap, optional
+            Registered colormap name or a Colormap instance.
+            Default is col_map='jet'.
+        resolution : int, optional
+            Number of contour lines.
+            Default is resolution=100.
+        figwidth : int or float, optional
+            Width of figure in centimeters [cm].
+            Default is figwidth=14. 
+        figheight : int or float, optional
+            Height of figure in centimeters [cm].
+            Default is figheight=8.
+        fig : figure, optional
+            A figure object.
+            Default is fig=None (a new figure object will be created).
+        ax : axes object, optional 
+            The axes of the subplot. 
+            Default is ax=None (current pyplot axes will be used).
+        tight_layout : boolean, optional
+            Use matplotlib.pyplot.tight_layout() to adjust subplot params 
+            (yes=True, no=False).
+            Default is tight_layout=True.           
+        
+        Returns
+        -------
+        fplot : numpy.ndarray
+            Frequency range of the dispersion image [Hz]. 
+        cplot : numpy.ndarray
+            Velocity range of the dispersion image [m/s]. 
+        Aplot : numpy.ndarray
+            Summed (slant-stack) amplitudes within the frequency range of
+            [f_min, f_max].
+        
+        """      
+        # Construct frequency and phase velocity matrices
+        f2 = np.array([self.f,]*self.A.shape[1]).transpose()
+        c2 = np.array([self.c,]*self.A.shape[0])
+             
+        # Limits of frequency axis
+        delta_fmin = abs(f2[:,0] - f_min)
+        no_fmin = np.where(delta_fmin == delta_fmin.min())
+        delta_fmax = abs(f2[:,0] - f_max)
+        no_fmax = np.where(delta_fmax == delta_fmax.min())
+    
+        # Get data for plotting
+        self.Aplot = self.A[no_fmin[0][0]:(no_fmax[0][0] + 1), :] 
+        self.fplot = f2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+        self.cplot = c2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+
+        from matplotlib.path import Path as MplPath
+
+        # Reshape the frequency and velocity matrices
+        f_vals = self.fplot.ravel()
+        c_vals = self.cplot.ravel()
+        coords = np.vstack((f_vals, c_vals)).T
+
+        # Define triangle vertices in (f, c) space
+        triangle_vertices = np.array([
+            [0, 0],
+            [40, 0],
+            [40, 400]
+        ])
+
+        # Create a Path object and boolean mask
+        tri_path = MplPath(triangle_vertices)
+        mask_flat = tri_path.contains_points(coords)
+        mask = mask_flat.reshape(self.Aplot.shape)
+
+        # Set amplitudes inside the triangle to zero
+        self.Aplot[mask] = 0
+
+        # Figure settings
+        if fig is None:   
+            fig = plt.figure(figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)))
+            fig.add_subplot(1, 1, 1)  
+        if ax is None:
+            ax = plt.gca()
+        
+        # Plot spectral image
+        cf = ax.contourf(self.fplot, self.cplot, self.Aplot, resolution, cmap=col_map)
+        cb = fig.colorbar(cf, ax=ax, ticks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0], orientation='vertical')
+        cb.set_label('Normalized amplitude', fontweight='bold')
+        
+        # Axis limits and axis labels 
+        ax.set_xlim(round(self.fplot[0,1],0), round(self.fplot[-1,1],0))   
+        ax.set_xlabel('Frequency [Hz]', fontweight='bold')
+        ax.set_ylim(self.cplot[0,0], self.cplot[0,-1])
+        ax.set_ylabel('Phase velocity [m/s]', fontweight='bold')
+        
+        # Figure appearance
+        ax.grid(color='lightgray', linestyle=':')
+        fig.set_tight_layout(tight_layout)
+
     def find_spectral_maxima(self):
     
         """

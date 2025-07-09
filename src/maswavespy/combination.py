@@ -439,6 +439,8 @@ class CombineDCs():
 
         fig.set_tight_layout(True)
 
+        return fig, ax
+
 
     def dc_combination(self, a, no_std=1, return_points=False, q_min=-9, q_max=50):
     
@@ -655,7 +657,77 @@ class CombineDCs():
         ax.set_axisbelow(True)
         ax.grid(color='gainsboro', linestyle=':')
         plt.legend(loc='lower left', frameon=False)
-        fig.set_tight_layout(True) 
+        fig.set_tight_layout(True)
+
+    def plot_combined_dc_AP(self, plot_all=False, figwidth=10, figheight=15, col='navy', pointcol='darkgray', pseudo_depth=False):
+        """
+        Plot the composite experimental dispersion curve and its upper/lower 
+        boundary curves. Optionally convert the y-axis to pseudo-depth (1/3 wavelength).
+        
+        Parameters
+        ----------
+        plot_all : bool, optional
+            Plot elementary dispersion curve data points (True) or not (False).
+        figwidth : int or float, optional
+            Width of figure in centimeters.
+        figheight : int or float, optional
+            Height of figure in centimeters.
+        col : matplotlib color, optional
+            Line color for dispersion curves.
+        pointcol : matplotlib color, optional
+            Marker color for elementary points.
+        pseudo_depth : bool, optional
+            If True, convert y-axis to pseudo-depth (1/3 wavelength).
+        """
+
+        # Determine y-axis label and scaling factor
+        if pseudo_depth:
+            y_label = 'Pseudo-depth (λ/3) [m]' if pseudo_depth else 'Wavelength [m]'
+            scale = 1 / 3
+        else:
+            y_label = 'Wavelength [m]'
+            scale = 1
+
+        # Precompute unscaled limits
+        y_min_raw = min(self.combined['wavelength'])
+        y_max_raw = max(self.combined['wavelength'])
+
+        # Apply limits before scaling to avoid empty space
+        y_lim_low = s.round_down_to_nearest(y_min_raw, 5) * scale
+        y_lim_high = s.round_up_to_nearest(y_max_raw, 5) * scale
+
+        # Figure setup
+        fig = plt.figure(figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)))
+        ax = fig.add_subplot(1, 1, 1)
+
+        # Plot elementary data points if requested
+        if plot_all:
+            ax.plot(self.c, self.wavelengths * scale, 'o', ms=4, color=pointcol, label='Data points')
+
+        # Plot mean and bounds
+        ax.plot(self.combined['c_mean'], self.combined['wavelength'] * scale, '-', color=col, lw=1, label='Mean')
+        ax.plot(self.combined['c_up'], self.combined['wavelength'] * scale, '-.', color=col, lw=1, label='Upper/lower')
+        ax.plot(self.combined['c_low'], self.combined['wavelength'] * scale, '-.', color=col, lw=1)
+
+        # Set axis limits
+        ax.set_xlim(
+            s.round_down_to_nearest(min(self.combined['c_low']), 25),
+            s.round_up_to_nearest(max(self.combined['c_up']), 25)
+        )
+        ax.set_ylim(y_lim_low, y_lim_high)
+        ax.invert_yaxis()
+
+        # Labels and grid
+        ax.set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
+        ax.set_ylabel(y_label, fontweight='bold')
+        ax.grid(color='gainsboro', linestyle=':')
+        ax.set_axisbelow(True)
+
+        # Legend and layout
+        plt.legend(loc='lower left', frameon=False)
+        fig.set_tight_layout(True)
+
+        return fig, ax
     
     
     def resample_dc(self, space='log', no_points=30, wavelength_min='default', wavelength_max='default', show_fig=True):
@@ -751,6 +823,76 @@ class CombineDCs():
     
         print('Composite DC (wavelength domain) resampled at ' + str(no_points) + space_print + ' points between wavelengths of ' + str(wavelength_min) + ' m and ' + str(wavelength_max) + ' m.')
 
+    def resample_dc_AP(self, space='log', no_points=30, wavelength_min='default', wavelength_max='default', show_fig=True, pseudo_depth=False):
+        """
+        Resample the composite experimental dispersion curve and its upper and 
+        lower boundary curves at no_points logarithmically or linearly spaced points 
+        within the interval of [wavelength_min, wavelength_max]. By default, 
+        wavelength_min = combined['wavelength'][0] and wavelength_max = combined['wavelength'][-1]. 
+        Visually compare the original and resampled dispersion curves (optional).
+        
+        Parameters
+        ----------
+        space : {'log', 'linear'}, optional
+            Spacing type for resampling.
+        wavelength_min : 'default', float or int
+            Minimum wavelength for resampling.
+        wavelength_max : 'default', float or int
+            Maximum wavelength for resampling.
+        no_points : int, optional
+            Number of sample points.
+        show_fig : bool, optional
+            Plot the original and resampled dispersion curves.
+        pseudo_depth : bool, optional
+            Plot using 1/3 wavelength (pseudo-depth) as y-axis.
+            
+        Returns
+        -------
+        resampled : dict
+            Resampled composite dispersion curve.
+        """
+
+        spaces = ['log', 'linear']
+        if space.lower() not in spaces:
+            raise ValueError(f"space must be specified as 'log' or 'linear', not as '{space}'")
+
+        f_dc_mean = interp1d(np.round(self.combined['wavelength'], 4), self.combined['c_mean'], kind='linear')
+        f_dc_low = interp1d(np.round(self.combined['wavelength'], 4), self.combined['c_low'], kind='linear')
+        f_dc_up = interp1d(np.round(self.combined['wavelength'], 4), self.combined['c_up'], kind='linear')
+
+        wavelength_min = self._check_wavelength(wavelength_min, 'min')
+        wavelength_max = self._check_wavelength(wavelength_max, 'max')
+
+        if space.lower() == 'log':
+            lambda_interp = np.round(np.geomspace(wavelength_min, wavelength_max, num=no_points, endpoint=True), 4)
+            space_print = ' logarithmically spaced'
+        else:
+            lambda_interp = np.round(np.linspace(wavelength_min, wavelength_max, num=no_points, endpoint=True), 4)
+            space_print = ' linearly spaced'
+
+        self.resampled['wavelength'] = lambda_interp
+        self.resampled['c_mean'] = f_dc_mean(lambda_interp)
+        self.resampled['c_low'] = f_dc_low(lambda_interp)
+        self.resampled['c_up'] = f_dc_up(lambda_interp)
+
+        # Plot - visually compare original and resampled dispersion curves
+        if show_fig:
+            fig, ax = self.plot_combined_dc_AP(pseudo_depth=pseudo_depth)
+
+            # Apply scaling for pseudo-depth
+            scale = 1 / 3 if pseudo_depth else 1
+            y_resampled = lambda_interp * scale
+            y_label = 'Pseudo-depth (λ/3) [m]' if pseudo_depth else 'Wavelength [m]'
+
+            ax.plot(self.resampled['c_mean'], y_resampled, 'o', ms=4, c='red', label='Mean (resampled)')
+            ax.plot(self.resampled['c_low'], y_resampled, 'o', ms=4, markerfacecolor='None', markeredgecolor='red', label='Upper/lower (resampled)')
+            ax.plot(self.resampled['c_up'], y_resampled, 'o', ms=4, markerfacecolor='None', markeredgecolor='red')
+            ax.set_ylabel(y_label, fontweight='bold')
+            ax.legend(loc='lower left', frameon=False)
+
+        print(f"Composite DC (wavelength domain) resampled at {no_points}{space_print} points between wavelengths of {wavelength_min} m and {wavelength_max} m.")
+
+        return fig, ax
    
     def _check_wavelength(self, wavelength, boundary):
         
