@@ -710,80 +710,170 @@ class InvertDC():
         
         return beta_run, alpha_run, h_run, c_t_run, e_run
     
+    # def mc_initiation_AP(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat, 
+    #                     alpha_sat, beta_initial, rho, h_initial, 
+    #                     rev_min_depth=None, rev_max_depth=None, 
+    #                     rev_min_layer=None, rev_max_layer=None,
+    #                     bs=10, bh=10, N_max=1000):
+
+
+    #     """
+    #     Monte Carlo inversion for shear wave velocity and layer thicknesses,
+    #     with flexible velocity reversal constraints.
+
+    #     Parameters
+    #     ----------
+    #     c_vec : numpy.ndarray
+    #         Rayleigh wave phase velocity, testing values [m/s].
+    #     c_step : float
+    #         Testing Rayleigh wave phase velocity increment [m/s].
+    #     delta_c : float
+    #         Zero search initiation parameter [m/s].
+    #             At wave number k_{i} the zero search is initiated at a phase velocity 
+    #             value of c_{i-1} - delta_c, where c_{i-1} is the theoretical  
+    #             Rayleigh wave phase velocity value at wave number k_{i-1}.
+    #     n : int
+    #         Number of finite thickness layers.
+    #     n_unsat : int
+    #         Number of unsaturated (soft) soil layers. 
+    #         n_unsat = 0 for a fully saturated profile (gwt at surface).
+    #         n_unsat = 1 for an unsaturated surficial layer.
+    #         ...
+    #         n_unsat = n+1 for a fully unsaturated profile.
+    #     alpha_initial : numpy.ndarray 
+    #         Initial values for the compressional wave velocity of each layer [m/s] 
+    #         (array of size (n+1,)).
+    #     nu_unsat : float
+    #         Poisson's ratio for unsaturated soil layers.
+    #     alpha_sat : float
+    #         Compressional wave velocity for saturated soil layers [m/s].
+    #     beta_initial : numpy.ndarray 
+    #         Initial values for the shear wave velocity of each layer [m/s] 
+    #         (array of size (n+1,)).
+    #     rho : numpy.ndarray 
+    #         Mass density of each layer [kg/m^3] (array of size (n+1,)).
+    #     h_initial : numpy.ndarray 
+    #         Initial thickness of each layer [m] (array of size (n,)).
+    #     rev_min_depth : float or None
+    #         Minimum depth [m] below which velocity reversals are allowed.
+    #     rev_max_depth : float or None
+    #         Maximum depth [m] above which velocity reversals are not allowed.
+    #     rev_min_layer : int or None
+    #         Minimum layer index (inclusive) where velocity reversals are allowed.
+    #     rev_max_layer : int or None
+    #         Maximum layer index (inclusive) where velocity reversals are allowed.
+    #     bs : int or float
+    #         Shear wave velocity search-control parameter.
+    #     bh : int or float
+    #         Layer thickness search-control parameter.
+    #     N_max : int
+    #         Number of iterations.
+
+    #     Returns
+    #     -------
+    #     beta_run : list of numpy.ndarrays
+    #         List of sampled shear wave velocity arrays [m/s].
+    #     alpha_run : list of numpy.ndarrays
+    #         List of compressional wave velocity arrays [m/s].
+    #     h_run : list of numpy.ndarrays
+    #         List of sampled layer thickness arrays [m].
+    #     c_t_run : list of numpy.ndarrays
+    #         List of theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
+    #     e_run : list
+    #         List of dispersion misfit values.
+          
+    #     beta_run[i], alpha_run[i], h_run[i], c_t_run[i] and e_run[i] result 
+    #     from the i-th iteration. 
+
+    #     """        
+    #      # Initiation    
+    #     beta_run = [None] * N_max
+    #     alpha_run = [None] * N_max
+    #     h_run = [None] * N_max
+    #     c_t_run = [None] * N_max
+    #     e_run = [None] * N_max
+
+    #     # Initial misfit
+    #     c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
+    #     e_opt = self.misfit(c_t)
+    #     beta_opt = beta_initial
+    #     h_opt = h_initial
+
+    #     # Precompute cumulative depth to determine reversal bounds
+    #     layer_depths = np.concatenate([[0], np.cumsum(h_initial)])
+    #     n_layers = len(beta_initial)
+
+    #     # Determine reversal index bounds
+    #     if rev_min_layer is not None:
+    #         rev_min = rev_min_layer
+    #     elif rev_min_depth is not None:
+    #         rev_min = np.searchsorted(layer_depths, rev_min_depth, side='right') - 1
+    #     else:
+    #         rev_min = 0  # default: no reversals above surface
+
+    #     if rev_max_layer is not None:
+    #         rev_max = rev_max_layer
+    #     elif rev_max_depth is not None:
+    #         rev_max = np.searchsorted(layer_depths, rev_max_depth, side='right') - 1
+    #     else:
+    #         rev_max = n_layers - 1  # default: reversals allowed to bottom
+
+    #     rev_min = np.clip(rev_min, 0, n_layers - 1)
+    #     rev_max = np.clip(rev_max, 0, n_layers - 1)
+
+    #     # Iteration
+    #     for w in range(N_max):
+    #         # Random shear wave velocity
+    #         beta_test = beta_opt + np.random.uniform(
+    #             low=(-(bs / 100) * beta_opt),
+    #             high=((bs / 100) * beta_opt)
+    #         )
+
+    #         # Enforce reversal constraints
+    #         while (
+    #             (rev_min > 0 and (beta_test[:rev_min+1] != np.sort(beta_test[:rev_min+1])).any()) or
+    #             (rev_max < n_layers - 1 and (beta_test[rev_max+1:] != np.sort(beta_test[rev_max+1:])).any())
+    #         ):
+    #             beta_test = beta_opt + np.random.uniform(
+    #                 low=(-(bs / 100) * beta_opt),
+    #                 high=((bs / 100) * beta_opt)
+    #             )
+
+    #         # Recalculate alpha
+    #         alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
+    #         alpha_test = alpha_sat * np.ones_like(beta_test)
+    #         if n_unsat > 0:
+    #             alpha_test[:n_unsat] = alpha_unsat[:n_unsat]
+
+    #         # Sample new thicknesses
+    #         h_test = h_opt + np.random.uniform(low=(-(bh / 100) * h_opt), high=((bh / 100) * h_opt))
+
+    #         # Misfit
+    #         c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
+    #         e_test = self.misfit(c_t)
+
+    #         beta_run[w] = beta_test
+    #         h_run[w] = h_test
+    #         alpha_run[w] = alpha_test
+    #         c_t_run[w] = c_t
+    #         e_run[w] = e_test
+
+    #         if e_test <= e_opt:
+    #             e_opt = e_test
+    #             beta_opt = beta_test
+    #             h_opt = h_test
+
+    #     return beta_run, alpha_run, h_run, c_t_run, e_run
+    
     def mc_initiation_AP(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat,
                     alpha_sat, beta_initial, rho, h_initial,
                     rev_min_depth=None, rev_max_depth=None,
                     rev_min_layer=None, rev_max_layer=None,
-                    bs=10, bh=10, N_max=1000, max_retries=100, monotonic_tol=1e-3):
+                    bs=10, bh=10, N_max=1000, max_retries=100, monotonic_tol=0.1):
         """
         Monte Carlo inversion for shear wave velocity and layer thicknesses,
-        with flexible velocity reversal constraints.
-
-        Parameters
-        ----------
-        c_vec : numpy.ndarray
-            Rayleigh wave phase velocity, testing values [m/s].
-        c_step : float
-            Testing Rayleigh wave phase velocity increment [m/s].
-        delta_c : float
-            Zero search initiation parameter [m/s].
-                At wave number k_{i} the zero search is initiated at a phase velocity 
-                value of c_{i-1} - delta_c, where c_{i-1} is the theoretical  
-                Rayleigh wave phase velocity value at wave number k_{i-1}.
-        n : int
-            Number of finite thickness layers.
-        n_unsat : int
-            Number of unsaturated (soft) soil layers. 
-            n_unsat = 0 for a fully saturated profile (gwt at surface).
-            n_unsat = 1 for an unsaturated surficial layer.
-            ...
-            n_unsat = n+1 for a fully unsaturated profile.
-        alpha_initial : numpy.ndarray 
-            Initial values for the compressional wave velocity of each layer [m/s] 
-            (array of size (n+1,)).
-        nu_unsat : float
-            Poisson's ratio for unsaturated soil layers.
-        alpha_sat : float
-            Compressional wave velocity for saturated soil layers [m/s].
-        beta_initial : numpy.ndarray 
-            Initial values for the shear wave velocity of each layer [m/s] 
-            (array of size (n+1,)).
-        rho : numpy.ndarray 
-            Mass density of each layer [kg/m^3] (array of size (n+1,)).
-        h_initial : numpy.ndarray 
-            Initial thickness of each layer [m] (array of size (n,)).
-        rev_min_depth : float or None
-            Minimum depth [m] below which velocity reversals are allowed.
-        rev_max_depth : float or None
-            Maximum depth [m] above which velocity reversals are not allowed.
-        rev_min_layer : int or None
-            Minimum layer index (inclusive) where velocity reversals are allowed.
-        rev_max_layer : int or None
-            Maximum layer index (inclusive) where velocity reversals are allowed.
-        bs : int or float
-            Shear wave velocity search-control parameter.
-        bh : int or float
-            Layer thickness search-control parameter.
-        N_max : int
-            Number of iterations.
-
-        Returns
-        -------
-        beta_run : list of numpy.ndarrays
-            List of sampled shear wave velocity arrays [m/s].
-        alpha_run : list of numpy.ndarrays
-            List of compressional wave velocity arrays [m/s].
-        h_run : list of numpy.ndarrays
-            List of sampled layer thickness arrays [m].
-        c_t_run : list of numpy.ndarrays
-            List of theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
-        e_run : list
-            List of dispersion misfit values.
-          
-        beta_run[i], alpha_run[i], h_run[i], c_t_run[i] and e_run[i] result 
-        from the i-th iteration. 
-
-        """       
+        with flexible velocity reversal constraints and retry safeguards.
+        """
 
         def is_monotonic(arr, increasing=True, tol=1e-3):
             diffs = np.diff(arr)
@@ -823,6 +913,8 @@ class InvertDC():
         rev_min = np.clip(rev_min, 0, n_layers - 1)
         rev_max = np.clip(rev_max, 0, n_layers - 1)
 
+        iter_fail_count = 0
+
         for w in range(N_max):
             # Retry with limit
             for attempt in range(max_retries):
@@ -840,7 +932,19 @@ class InvertDC():
                 if valid:
                     break
             else:
-                continue  # Skip this iteration if a valid beta_test is not found
+                # Use previous best model to preserve array length without None
+                # print("perturbation failed, proceeding previous model")
+                iter_fail_count = iter_fail_count+1
+                beta_test = beta_opt.copy()
+                h_test = h_opt.copy()
+
+                alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
+                alpha_test = alpha_sat * np.ones_like(beta_test)
+                if n_unsat > 0:
+                    alpha_test[:n_unsat] = alpha_unsat[:n_unsat]
+
+                c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
+                e_test = self.misfit(c_t)
 
             # Update alpha
             alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
@@ -868,6 +972,8 @@ class InvertDC():
                 e_opt = e_test
                 beta_opt = beta_test
                 h_opt = h_test
+
+        print(f"Iteration fail count: {iter_fail_count}/{N_max}")
 
         return beta_run, alpha_run, h_run, c_t_run, e_run
 
@@ -1005,7 +1111,8 @@ class InvertDC():
                                 initial['rho'], initial['h'], 
                                 initial['rev_min_depth'], initial['rev_max_depth'], 
                                 initial['rev_min_layer'], initial['rev_max_layer'],
-                                settings['bs'], settings['bh'], settings['N_max'])
+                                settings['bs'], settings['bh'], settings['N_max'], 
+                                settings['max_retries'], settings['monotonic_tol'])
 
             
             beta_all[i], alpha_all[i], h_all[i], c_t_all[i], e_all[i] = temp
