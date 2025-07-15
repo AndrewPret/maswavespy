@@ -51,9 +51,10 @@ import numpy as np
 # class method. See https://docs.obspy.org/packages/autogen/obspy.core.stream.read.html
 # for a list of supported file formats. 
 
-# Initialize a multi-channel record object from a text file.
-file_name = r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\VSG\all_trains_section_3_MidP_chan_48_VSG_NOT_SEG2.dat"; header_lines = 0
-section = "section3"
+# Initialize a multi-channel record object from a text 
+
+file_name = r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\VSG\all_trains_section_74_MidP_chan_1184_VSG_NOT_SEG2.dat"; header_lines = 0
+section = "section74"
 
 n = 30                 # Number of receivers
 direction = 'forward';   # Direction of measurement
