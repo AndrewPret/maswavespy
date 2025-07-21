@@ -33,6 +33,9 @@ from maswavespy import wavefield
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
+import glob
+import os
+import re
 
 # ------ Dispersion processing: Import seismic data ------
 # Import data from a text file, general requirements:      
@@ -53,77 +56,99 @@ import numpy as np
 
 # Initialize a multi-channel record object from a text 
 
-file_name = r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\VSG\all_trains_section_74_MidP_chan_1184_VSG_NOT_SEG2.dat"; header_lines = 0
-section = "section74"
+data_dir = r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\VSG"
+results_dir = r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\DC_picks_manual"
 
-n = 30                 # Number of receivers
-direction = 'forward';   # Direction of measurement
-dx = 1.595                 # Receiver spacing [m]
-x1 = 2*dx                # Source offset [m]
-fs = 200                # Sampling frequency [Hz]
-f_pick_min = 4.5       # Only identify the dispersion curve at frequencies higher or equal to f_pick_min
+#file_names = [os.path.basename(f) for f in glob.glob(rf'{data_dir}\*_VSG_NOT_SEG2.dat')]
 
-# Create a multi-channel record object
-site = 'AZD1'
-profile = 'P1'
-rec_TestSite = wavefield.RecordMC.import_from_textfile(site, profile, file_name, header_lines, n, direction, dx, x1, fs, f_pick_min)
+# Get filenames containing "section_N"
+file_names = [os.path.basename(f) for f in glob.glob(rf'{data_dir}\*_VSG_NOT_SEG2.dat')]
 
-# Plot the recorded wavefield
-rec_TestSite.plot_data(du=0.75, normalized=False, filled=True)
-plt.show()
-# Print message to user
-print('A multi-channel record containing ' + str(n) + ' traces has been imported as a RecordMC object from the file ' + file_name)
-print('The imported wavefield has been plotted.')
+# Sort based on the numeric value after 'section_'
+def extract_section_number(filename):
+    match = re.search(r'section_(\d+)', filename)
+    return int(match.group(1)) if match else float('inf')
 
-#%%
-# Compute and view dispersion image of recorded wavefield
-# Create a elementary dispersion curve object
-cT_min = 2; cT_max = 1000; cT_step = 0.5
-edc_TestSite = rec_TestSite.element_dc(cT_min, cT_max, cT_step)
+sorted_files = sorted(file_names, key=extract_section_number)
 
-f_min = 2; f_max = 50
+print(sorted_files)
 
-for i in range(edc_TestSite.A.shape[0]):
-    max_val = np.max(edc_TestSite.A[i, :])
-    if max_val != 0:
-        edc_TestSite.A[i, :] /= max_val
-  
-edc_TestSite.plot_dispersion_image(f_min, f_max)
+for i, file_name in enumerate(sorted_files):
 
-# Print message to user
-print('An elementary dispersion curve object has been initialized.')
-print('The dispersion image of the imported wavefield has been plotted.')
+  section_i = i+1
 
-#%%
-# Identify elementary dispersion curves (DC) based on spectral maxima.
-# The identified DC is saved to the ElementDC object (edc_TestSite in this tutorial).
-# Please note that the GUI for dispersion curve identification will open in a new window.
-# Instructions on how to use the dispersion curve identification tool are provided.
-# within the GUI 
-edc_TestSite.pick_dc(f_min, f_max)
+  if section_i <=17:
+      continue
 
-#%%
-# Return the identified elementary DC as a dictionary. 
-edc_TestSite_dict = edc_TestSite.return_to_dict() 
+  n = 30                 # Number of receivers
+  direction = 'forward';   # Direction of measurement
+  dx = 1.595                 # Receiver spacing [m]
+  x1 = 2*dx                # Source offset [m]
+  fs = 200                # Sampling frequency [Hz]
+  f_pick_min = 4.5       # Only identify the dispersion curve at frequencies higher or equal to f_pick_min
 
-np.savetxt(rf"C:\Users\andrew.pretorius\Documents\azd1_manual picks\f0_{section}.txt", edc_TestSite_dict['f0'])
-np.savetxt(rf"C:\Users\andrew.pretorius\Documents\azd1_manual picks\c0_{section}.txt", edc_TestSite_dict['c0'])
+  # Create a multi-channel record object
+  site = 'AZD1'
+  profile = 'P1'
+  header_lines = 0
+  rec_TestSite = wavefield.RecordMC.import_from_textfile(site, profile, rf'{data_dir}\{file_name}', header_lines, n, direction, dx, x1, fs, f_pick_min)
 
-#pickle.dump(edc_TestSite,r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\DC_picks_manual\all_trains_section_75_MidP_chan_1200.pkl", "wb")
+  # Plot the recorded wavefield
+  rec_TestSite.plot_data(du=0.75, normalized=False, filled=True)
+  plt.show()
+  # Print message to user
+  print('A multi-channel record containing ' + str(n) + ' traces has been imported as a RecordMC object from the file ' + file_name)
+  print('The imported wavefield has been plotted.')
 
-# Plot returned DC
-import matplotlib.pyplot as plt
-fig, ax = plt.subplots(1,1)
-#edc_TestSite.plot_dispersion_image(f_min, f_max, fig=fig, ax=ax)
-ax.plot(edc_TestSite_dict['f0'], edc_TestSite_dict['c0'],'o') 
-ax.grid()
-ax.set_xlabel('Frequency [Hz]')
-ax.set_ylabel('Phase velocity [m/s]')
-ax.set_xlim([f_min, f_max])
-ax.set_ylim([cT_min, cT_max])
-plt.savefig(rf"C:\Users\andrew.pretorius\Documents\azd1_manual picks\picks_{section}.png")
-plt.show()
+  #%%
+  # Compute and view dispersion image of recorded wavefield
+  # Create a elementary dispersion curve object
+  cT_min = 2; cT_max = 1000; cT_step = 0.5
+  edc_TestSite = rec_TestSite.element_dc(cT_min, cT_max, cT_step)
 
-# Print message to user
-print('The identified dispersion curve has been plotted.')
+  f_min = 2; f_max = 50
+
+  for i in range(edc_TestSite.A.shape[0]):
+      max_val = np.max(edc_TestSite.A[i, :])
+      if max_val != 0:
+          edc_TestSite.A[i, :] /= max_val
+    
+  edc_TestSite.plot_dispersion_image(f_min, f_max)
+
+  # Print message to user
+  print('An elementary dispersion curve object has been initialized.')
+  print('The dispersion image of the imported wavefield has been plotted.')
+
+  #%%
+  # Identify elementary dispersion curves (DC) based on spectral maxima.
+  # The identified DC is saved to the ElementDC object (edc_TestSite in this tutorial).
+  # Please note that the GUI for dispersion curve identification will open in a new window.
+  # Instructions on how to use the dispersion curve identification tool are provided.
+  # within the GUI 
+  edc_TestSite.pick_dc(f_min, f_max)
+
+  #%%
+  # Return the identified elementary DC as a dictionary. 
+  edc_TestSite_dict = edc_TestSite.return_to_dict() 
+
+  np.savetxt(rf'{results_dir}\f0_section_{section_i}.txt', edc_TestSite_dict['f0'])
+  np.savetxt(rf'{results_dir}\c0_section_{section_i}.txt', edc_TestSite_dict['c0'])
+
+  #pickle.dump(edc_TestSite,r"O:\SysEng SW\Projects_General_Access\RD0077 Sensonic\passive-MASW\results_from_7thJuly\AZD_site1\DC_picks_manual\all_trains_section_75_MidP_chan_1200.pkl", "wb")
+
+  # Plot returned DC
+  import matplotlib.pyplot as plt
+  fig, ax = plt.subplots(1,1)
+  #edc_TestSite.plot_dispersion_image(f_min, f_max, fig=fig, ax=ax)
+  ax.plot(edc_TestSite_dict['f0'], edc_TestSite_dict['c0'],'o') 
+  ax.grid()
+  ax.set_xlabel('Frequency [Hz]')
+  ax.set_ylabel('Phase velocity [m/s]')
+  ax.set_xlim([f_min, f_max])
+  ax.set_ylim([cT_min, cT_max])
+  plt.savefig(rf'{results_dir}\picks_section_{section_i}.png')
+  plt.close()
+
+  # Print message to user
+  print('The identified dispersion curve has been plotted.')
 

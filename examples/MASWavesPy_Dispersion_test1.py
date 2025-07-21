@@ -65,6 +65,7 @@ rec_TestSite = wavefield.RecordMC.import_from_textfile(site, profile, file_name,
 
 # Plot the recorded wavefield
 rec_TestSite.plot_data(du=0.75, normalized=False, filled=True)
+plt.show()
 
 # Print message to user
 print('A multi-channel record containing ' + str(n) + ' traces has been imported as a RecordMC object from the file ' + file_name)

@@ -340,7 +340,7 @@ class CombineDCs():
                 Phase velocity standard deviation (for each frequency bin) [m/s]            
             Tuple[3] : numpy.ndarray
                 Coefficient of variation [-].
-           
+        
         """   
         # Compute frequency values and round to the nearest binwidth
         f_vec_round = s.round_to_nearest(self.freq, binwidth)
