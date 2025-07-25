@@ -437,7 +437,7 @@ class SelectDC(tk.Frame):
         self.msg.configure(text=message)
 
 # =============================================================================
-#   Plot dipsersion image
+#   Plot dispersion image
 # =============================================================================
 
     def view_dispersion_image(self):

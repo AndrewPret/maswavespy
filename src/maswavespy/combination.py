@@ -35,6 +35,7 @@ Dispersion curve combination
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter
 
 from maswavespy import supplemental as s
 
@@ -123,7 +124,7 @@ class CombineDCs():
     
     """
     
-    def __init__(self, site, profile, freq, c, metadata=None):
+    def __init__(self, site, profile, freq, c, smoothing=False, metadata=None):
         
         """
         Initialize a composite dispersion curve object.
@@ -156,6 +157,9 @@ class CombineDCs():
         self.freq = self._to_array(freq)
         self.c = self._to_array(c)
         self.wavelengths = self.c/self.freq
+
+        # smoothing for resampled dispersion curve
+        self.smoothing = smoothing
         
         # Initiate dispersion processing attributes
         self.cov = None
@@ -823,7 +827,7 @@ class CombineDCs():
     
         print('Composite DC (wavelength domain) resampled at ' + str(no_points) + space_print + ' points between wavelengths of ' + str(wavelength_min) + ' m and ' + str(wavelength_max) + ' m.')
 
-    def resample_dc_AP(self, space='log', no_points=30, wavelength_min='default', wavelength_max='default', show_fig=True, pseudo_depth=False):
+    def resample_dc_AP(self, space='log', no_points=30, smoothing=False, wavelength_min='default', wavelength_max='default', show_fig=True, pseudo_depth=False):
         """
         Resample the composite experimental dispersion curve and its upper and 
         lower boundary curves at no_points logarithmically or linearly spaced points 
@@ -874,6 +878,12 @@ class CombineDCs():
         self.resampled['c_mean'] = f_dc_mean(lambda_interp)
         self.resampled['c_low'] = f_dc_low(lambda_interp)
         self.resampled['c_up'] = f_dc_up(lambda_interp)
+
+        if smoothing:
+            self.resampled['c_mean'] = gaussian_filter(self.resampled['c_mean'], sigma=1)
+            self.resampled['c_low'] = gaussian_filter(self.resampled['c_low'], sigma=1)
+            self.resampled['c_up'] = gaussian_filter(self.resampled['c_up'], sigma=1)
+
 
         # Plot - visually compare original and resampled dispersion curves
         if show_fig:
