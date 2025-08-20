@@ -303,7 +303,8 @@ class SelectDC(tk.Frame):
     
     """
         
-    def __init__(self, ElementDC, f_min, f_max, master=None):
+    def __init__(self, ElementDC, f_min, f_max, window=None, master=None, prev_sect_picks=None, 
+                    prev_trans_picks=None, replace_transform=False, transform='phase-shift', section=None):
         
         """
         Initialize a dispersion curve selection object.
@@ -327,7 +328,14 @@ class SelectDC(tk.Frame):
         
         """
         super().__init__(master)
+
+        if window=='max':
+            # open maximised window
+            master.state('zoomed')
+
         self.master = master
+
+        
         
         self.elementdc = ElementDC
         self.f_min = f_min
@@ -342,14 +350,14 @@ class SelectDC(tk.Frame):
         self.configure_gui()
         
         # Create widgets
-        self.widgets_header()
+        self.widgets_header(transform, section)
         self.widgets_footer()
         self.widgets_use_pointIDs()  
         self.widgets_use_mouse_click_events()
         self.widgets_save_selection()
         
         # Plot dispersion image
-        self.view_dispersion_image()
+        self.view_dispersion_image(prev_sect_picks=prev_sect_picks, prev_trans_picks=prev_trans_picks, replace_transform=replace_transform)
         
         # Status of start-selection buttons
         self.select_ids = False
@@ -368,7 +376,7 @@ class SelectDC(tk.Frame):
         self.master.grid_columnconfigure(0, weight=1)
 
    
-    def widgets_header(self):        
+    def widgets_header(self, transform, section):        
         
         """ 
         Create header frame and add label. 
@@ -378,7 +386,7 @@ class SelectDC(tk.Frame):
         frm_header.grid(row=0, column=0, columnspan=4, sticky='w')
 
         lbl_header = tk.Label(frm_header, font=('DejaVu Sans', 12, 'bold'),
-                                   text='Dispersion curve identification')
+                                   text=f'Dispersion curve identification, section {section}, {transform} transform')
         lbl_header.grid(row=0, column=0, columnspan=4, sticky='w')
 
 
@@ -388,7 +396,7 @@ class SelectDC(tk.Frame):
         Create footer frame and add widgets.
         
         """
-        frm_footer = tk.Frame(self.master, width=650, padx=9, pady=3)
+        frm_footer = tk.Frame(self.master, width=1000, padx=9, pady=3, height=100)
         frm_footer.grid(row=10, column=0, columnspan=4, sticky='w')
           
         self.btn_close_window(frm_footer)
@@ -396,7 +404,7 @@ class SelectDC(tk.Frame):
         
         # Print user instructions
         temp_message = '\n \n \n \n \n'
-        self.msg = tk.Message(frm_footer, width=650, text=temp_message, font=('DejaVu Sans', 9, 'normal')) 
+        self.msg = tk.Message(frm_footer, width=1000, text=temp_message, font=('DejaVu Sans', 7, 'normal')) 
         self.msg.grid(row=0, column=1, sticky='w')
 
         
@@ -440,7 +448,7 @@ class SelectDC(tk.Frame):
 #   Plot dispersion image
 # =============================================================================
 
-    def view_dispersion_image(self):
+    def view_dispersion_image(self, prev_sect_picks=None, prev_trans_picks=None, replace_transform=False):
         
         """
         Plot dispersion image and show the spectral maximum at each frequency.
@@ -452,9 +460,27 @@ class SelectDC(tk.Frame):
         fig.subplots_adjust(bottom=0.12, top=0.92, left=0.11, right=0.99)
                 
         # Plot dispersion image 
-        self.elementdc.plot_dispersion_image(self.f_min, self.f_max, col_map='jet',  
-                                             fig=fig, ax=self.ax0, tight_layout=False)
-              
+        self.elementdc.plot_dispersion_image(self.f_min, self.f_max, replace_transform=replace_transform, col_map='jet',  
+                                            fig=fig, ax=self.ax0, tight_layout=False)
+        
+        # add previous picks for reference
+        if prev_sect_picks:
+            alpha_list = np.linspace(0.4, 0.8, len(prev_sect_picks[0])).tolist()
+            for i in range(len(prev_sect_picks[0])):
+                f_picks_prev_sect = prev_sect_picks[0][i]
+                c_picks_prev_sect = prev_sect_picks[1][i]
+                self.ax0.scatter(f_picks_prev_sect, c_picks_prev_sect, marker='o', alpha=alpha_list[i], edgecolors='black', label='previous section picks')
+
+        if prev_trans_picks:
+            for i in range(len(prev_trans_picks[0])):
+                f_picks_prev_trans = prev_trans_picks[0][i]
+                c_picks_prev_trans = prev_trans_picks[1][i]
+                self.ax0.scatter(f_picks_prev_trans, c_picks_prev_trans, marker='X', alpha=0.8, edgecolors='black', label='previous transform picks')
+
+
+        self.ax0.legend(loc='upper right', fontsize=8)
+
+    
         # Plot spectral maxima
         Amax = self.elementdc.find_spectral_maxima()
         self.elementdc.Amax = Amax
@@ -1505,6 +1531,21 @@ class SelectDC(tk.Frame):
         
         # Plot saved data points on top of an existing dispersion image
         self.ax0.scatter(self.elementdc.f0, self.elementdc.c0, s=11, color='black')
+
+        print(f"{len(self.elementdc.f0)} picked points saved")
         
         # Update the dispersion image
         self.canvas.draw()
+
+    # def btn_restart(self, frame):
+    #     """
+    #     Create a button to exit the GUI and trigger a restart.
+        
+    #     Parameters
+    #     ----------
+    #     frame : tkinter.Frame
+    #     """
+    #     restart_btn = tk.Button(frame, text='Restart', font=('DejaVu Sans', 10, 'bold'),
+    #                             foreground='red', height=1, width=8,
+    #                             command=self.restart_gui)
+    #     restart_btn.grid(row=1, column=1, sticky='w', padx=3, pady=3)

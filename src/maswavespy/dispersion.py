@@ -178,7 +178,7 @@ class ElementDC():
         self.c0 = None
 
 
-    def plot_dispersion_image(self, f_min, f_max, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, tight_layout=True):
+    def plot_dispersion_image(self, f_min, f_max, replace_transform=None, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, tight_layout=True):
     
         """           
         Plot the two-dimensional dispersion image (phase velocity spectrum) 
@@ -237,9 +237,23 @@ class ElementDC():
         no_fmax = np.where(delta_fmax == delta_fmax.min())
     
         # Get data for plotting
-        self.Aplot = self.A[no_fmin[0][0]:(no_fmax[0][0] + 1), :] 
-        self.fplot = f2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
-        self.cplot = c2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+        if replace_transform == 0 or replace_transform == None:
+            self.Aplot = self.A[no_fmin[0][0]:(no_fmax[0][0] + 1), :] 
+            self.fplot = f2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+            self.cplot = c2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+        else:
+            print("replacing Aplot with swprocess disersion image for plotting")
+            self.Aplot = self.A_list_swp[replace_transform-1]
+            self.fplot = f2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+            self.cplot = c2[no_fmin[0][0]:(no_fmax[0][0] + 1), :]
+
+
+
+        # normalise Aplot per frequency
+        for i in range(self.Aplot.shape[0]):
+            max_val = np.max(self.Aplot[i, :])
+            if max_val != 0:
+                self.Aplot[i, :] /= max_val
         
         # Figure settings
         if fig is None:   
@@ -262,6 +276,8 @@ class ElementDC():
         # Figure appearance
         ax.grid(color='lightgray', linestyle=':')
         fig.set_tight_layout(tight_layout)
+
+        return fig, ax
 
 
     def plot_dispersion_image_ZET(self, f_min, f_max, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, tight_layout=True):
@@ -390,7 +406,7 @@ class ElementDC():
         # Normalize slant-stacked amplitudes at each frequency
         Anorm = np.zeros(np.shape(self.Aplot))
         for i in range(self.Aplot.shape[0]):
-            Anorm[i,:] = self.Aplot[i,:] / np.amax(self.Aplot[i,:])
+            Anorm[i,:] = self.Aplot[i,:] / (np.amax(self.Aplot[i,:]))
         
         # Identify spectral maxima
         f_loc, c_loc = np.where(Anorm == 1)        
@@ -514,8 +530,9 @@ class ElementDC():
             return labels_text
         
     
-    def pick_dc(self, f_min, f_max):
-        
+    def pick_dc(self, f_min, f_max, window=None, prev_sect_picks=None, prev_trans_picks=None, replace_transform=False, 
+                transform='phase-shift', section=None):
+
         """
         Identify (elementary) dispersion curves from multi-channel 
         surface wave registrations. Opens a GUI for dispersion curve selection.
@@ -530,8 +547,12 @@ class ElementDC():
         """          
         print("A GUI for dispersion curve selection has been opened in a separate window. \n")
         # Open GUI
-        app = SelectDC(self, f_min, f_max, master=tk.Tk())
+        app = SelectDC(self, f_min, f_max, window=window, master=tk.Tk(), prev_sect_picks=prev_sect_picks, 
+                        prev_trans_picks=prev_trans_picks, replace_transform=replace_transform, 
+                        transform=transform, section=section)
         app.mainloop()
+        
+
         
     
     def return_to_dict(self):

@@ -194,7 +194,7 @@ class InvertDC():
     
     def __init__(self, site, profile, c_obs, c_obs_low, c_obs_up, wavelength, uncertainty_weighting,
                     depth_weights, depth_weight_offset_const, misfit_mode, plot_weights_file, 
-                    regularisation, regularisation_weight, regularisation_range, 
+                    regularisation, regularisation_weights, regularisation_ranges, 
                     damping, damping_weight, damp_ref_Vs, damp_ref_h,
                     settings, metadata=None):    
         
@@ -247,12 +247,18 @@ class InvertDC():
 
         # misfit regularisation and damping
         self.regularisation = regularisation 
-        self.regularisation_weight = regularisation_weight     
-        self.regularisation_range = regularisation_range
+        self.regularisation_weights = regularisation_weights   
+        self.regularisation_ranges = regularisation_ranges
         self.damping = damping
         self.damping_weight = damping_weight
         self.damp_ref_Vs=damp_ref_Vs 
         self.damp_ref_h=damp_ref_h
+
+        # initialise misfit penalties
+        self.max_model_smooth_pen = 1
+        self.max_bounds_pen = 1
+        self.max_diversity_pen = 1
+        self.max_damping_pen = 1
 
 
         # All sampled profiles.
@@ -323,199 +329,125 @@ class InvertDC():
         """
         return (1 / len(c_t)) * sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
     
-    # def misfit_AP(self, c_t, wavelengths, uncertainty_weighting=False, uncertainty=None, depth_weights=None, offset_const=1, 
-    #               mode='average', plot_weights_file=False):
-    #     """
-    #     Evaluate uncertainty- and depth-weighted dispersion misfit with optional smoothness regularisation.
-
-    #     Parameters
-    #     ----------
-    #     c_t : numpy.ndarray
-    #         Theoretical dispersion curve (Rayleigh phase velocities) [m/s].
-    #     wavelengths : numpy.ndarray
-    #         Wavelengths corresponding to the phase velocities [m].
-    #     uncertainty_weighting : bool
-    #         Whether to apply 1/uncertainty weighting.
-    #     uncertainty : numpy.ndarray
-    #         Standard deviation or uncertainty in observed phase velocities [m/s].
-    #     depth_weights : numpy.ndarray
-    #         Depth-based weights (usually 1/depth).
-    #     offset_const : float
-    #         Offset constant added to depth_weights before normalization.
-    #     mode : str
-    #         Misfit mode: 'average', 'average_weighted', 'max', 'max_weighted', 'percentile'.
-    #     plot_weights_file : str or False
-    #         If filename is provided, save a plot of the weights.
-    #     regularisation : bool
-    #         Whether to apply regularisation.
-    #     regularisation_weight : float
-    #         Strength of regularisation penalty (lambda).
-    #     regularisation_range : tuple or list of two floats
-    #         Wavelength range over which regularisation is applied.
-
-    #     Returns
-    #     -------
-    #     float
-    #         Weighted misfit value.
-    #     """
-
-
-    #     percent_errors = (np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
-
-    #     # narrow uncertainty bands get increased weighting and vice versa, then normalise
-    #     if uncertainty_weighting == True:
-    #         uncertainty_weights = 1 / uncertainty
-    #         uncertainty_weights = uncertainty_weights + (np.max(uncertainty_weights)*2)
-    #         uncertainty_weights = uncertainty_weights/np.max(uncertainty_weights)
-    #     elif uncertainty_weighting == False:
-    #         uncertainty_weights = None
-
-    #     # add offset to depth weights to avoid vanishing weights for deepest layers
-    #     # offset_const = 1 means depth weights have 1*max(depth_weights) added before normalising
-    #     # if depth_weights start with range 1 to 0, after adding 1*max(depth_weights) they're 2 to 1,
-    #     # after normalisation 1 to 0.5
-    #     depth_weights = depth_weights/np.max(depth_weights)
-    #     depth_weights = depth_weights + np.max(depth_weights)*offset_const
-    #     depth_weights = depth_weights/np.max(depth_weights)
-
-    #     if uncertainty_weights is not None and depth_weights is not None:
-    #         total_weights = uncertainty_weights * depth_weights
-    #     elif uncertainty_weights is not None:
-    #         total_weights = uncertainty_weights
-    #     elif depth_weights is not None:
-    #         total_weights = depth_weights
-    #     else:
-    #         total_weights = None
-
-    #     if plot_weights_file:
-    #         # plot normalised misfit weights
-    #         wavelengths_1third = wavelengths/3
-
-    #         plt.figure(figsize=(8, 5))
-    #         if uncertainty_weights is not None and depth_weights is not None:
-    #             plt.plot(wavelengths_1third, uncertainty_weights, label='Uncertainty weights', marker='x')
-    #             plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
-    #             plt.plot(wavelengths_1third, total_weights, label='Total Weights', marker='x')
-    #         elif uncertainty_weights is not None:
-    #             plt.plot(wavelengths_1third, uncertainty_weights, label='Base Weights (1/uncertainty)', marker='x')
-    #         elif depth_weights is not None:
-    #             plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
-
-
-    #         plt.xlabel("1/3rd wavelength (m)")
-    #         plt.ylabel("Normalized Weight")
-    #         plt.title("Weighting Functions for Dispersion Misfit")
-    #         plt.legend()
-    #         plt.grid(True)
-    #         plt.tight_layout()
-    #         plt.savefig(plot_weights_file)
-    #         plt.close()
-
-    #     if mode == 'average_weighted':
-    #         weighted_percent_misfit = np.average(percent_errors, weights=total_weights)
-    #         return weighted_percent_misfit
-        
-    #     elif mode == 'average':
-    #         return (1 / len(c_t)) * sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
-        
-    #     elif mode == 'max_weighted':
-    #         max_misfit = np.max(percent_errors*total_weights)
-    #         return max_misfit
-        
-    #     elif mode == 'max':
-    #         max_misfit = np.max(percent_errors)
-    #         return max_misfit
-        
-    #     elif mode =='percentile':
-    #         p90_misfit = np.percentile(percent_errors, 90)
-    #         return p90_misfit
-
-        
-    # def misfit_regularised(self, c_t, vs, lambda_reg=0.1):
-    #     """
-    #     Evaluate dispersion misfit with contrast penalty.
-
-    #     Parameters
-    #     ----------
-    #     c_t : numpy.ndarray
-    #         Theoretical dispersion curve [m/s].
-    #     vs : numpy.ndarray
-    #         Shear wave velocity model [m/s] for each layer.
-    #     lambda_reg : float
-    #         Regularization weight for contrast penalty.
-
-    #     Returns
-    #     -------
-    #     float 
-    #         Total misfit [%] including contrast penalty.
-    #     """
-    #     # Original dispersion misfit (%)
-    #     misfit_disp = (1 / len(c_t)) * np.sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
-
-    #     # Contrast penalty: sum of absolute layer-to-layer differences
-    #     contrast_penalty = np.sum(np.abs(np.diff(vs)))
-
-    #     # Total misfit with contrast regularization
-    #     total_misfit = misfit_disp + lambda_reg * contrast_penalty
-
-    #     return total_misfit
 
     def misfit_AP(self, c_t, wavelengths, model_Vs, model_h, 
                 uncertainty_weighting=False, uncertainty=None, 
                 depth_weights=None, offset_const=1, 
                 mode='average', plot_weights_file=False,
-                regularisation=False, regularisation_weight=0.0,
-                regularisation_range=None, damping=False,
+                regularisation=False, regularisation_weights=None,
+                regularisation_ranges=None, damping=False,
                 damping_weight=0.0, damp_ref_Vs=None, damp_ref_h=None):
         """
-        Evaluate uncertainty- and depth-weighted dispersion misfit with optional smoothness regularisation.
+        Evaluate the misfit between observed and theoretical MASW dispersion curves, with optional
+        uncertainty weighting, depth weighting, and multiple normalized penalty terms.
+
+        All penalty weights are on a [0, 1] scale:
+            - 0 = no effect
+            - 1 = maximum possible effect given predefined or estimated maximum penalty magnitudes
 
         Parameters
         ----------
-        c_t : numpy.ndarray
-            Theoretical dispersion curve (Rayleigh phase velocities) [m/s].
-        wavelengths : numpy.ndarray
-            Wavelengths corresponding to the phase velocities [m].
-        uncertainty_weighting : bool
-            Whether to apply 1/uncertainty weighting.
-        uncertainty : numpy.ndarray
-            Standard deviation or uncertainty in observed phase velocities [m/s].
-        depth_weights : numpy.ndarray
-            Depth-based weights (usually 1/depth).
-        offset_const : float
-            Offset constant added to depth_weights before normalization.
-        mode : str
-            Misfit mode: 'average', 'average_weighted', 'max', 'max_weighted', 'percentile'.
-        plot_weights_file : str or False
-            If filename is provided, save a plot of the weights.
-        regularisation : bool
-            Whether to apply regularisation
-        regularisation_weight : float
-            Strength of regularisation penalty (lambda).
-        regularisation_range : tuple or list of two floats
-            1/3 wavelength range over which regularisation is applied.
+        c_t : numpy.ndarray (1D)
+            Theoretical phase velocity curve (Rayleigh mode) in m/s, same length as `self.c_obs`.
+        wavelengths : numpy.ndarray (1D)
+            Wavelengths corresponding to `c_t` in meters.
+        model_Vs : numpy.ndarray (1D)
+            Shear-wave velocities for each model layer (m/s).
+        model_h : numpy.ndarray (1D)
+            Thicknesses of each model layer (m).
+
+        uncertainty_weighting : bool, default=False
+            If True, apply weights proportional to 1 / uncertainty.
+        uncertainty : numpy.ndarray (1D), optional
+            Standard deviations or uncertainties in observed phase velocities (m/s).
+            Required if `uncertainty_weighting=True`.
+
+        depth_weights : numpy.ndarray (1D), optional
+            Depth-based weights, typically 1 / depth. Must match length of `wavelengths`.
+        offset_const : float, default=1
+            Constant added to depth weights before normalization.
+
+        mode : {'average', 'average_weighted', 'max', 'max_weighted', 'percentile'}, default='average'
+            Base misfit calculation mode:
+                - 'average': mean % error
+                - 'average_weighted': weighted mean % error
+                - 'max': maximum % error
+                - 'max_weighted': weighted maximum % error
+                - 'percentile': 90th percentile % error
+
+        plot_weights_file : bool or str, default=False
+            If string (filename), save a plot of the applied weights.
+
+        regularisation : {'dc', 'model', False}, default=False
+            Regularization type:
+                - 'dc': smoothness penalty on dispersion curve
+                - 'model': smoothness penalty on Vs profile
+                - False: no regularization applied
+        regularisation_weight : float, default=0.0
+            Weight for regularization term, in [0, 1].
+        regularisation_range : list[tuple[float, float]], optional
+            Depth ranges (in meters) over which to apply regularization, e.g. [(0, 10), (20, 30)].
+            If None, applies to full depth range.
+
+        damping : bool, default=False
+            If True, apply damping penalty to keep model close to a reference model.
+        damping_weight : float, default=0.0
+            Weight for damping penalty, in [0, 1].
+        damp_ref_Vs : numpy.ndarray (1D), optional
+            Reference Vs profile (same length as `model_Vs`). Required if `damping=True`.
+        damp_ref_h : numpy.ndarray (1D), optional
+            Reference layer thicknesses (same length as `model_h`).
+
+        self.settings['uncert_bounds_misfit_weight'] : float in [0, 1]
+            Weight for bounds violation penalty.
+        self.settings['rep_explore_pen_weight'] : float in [0, 1]
+            Weight for diversity penalty.
+
+        Notes
+        -----
+        Penalty Terms (all normalized before weighting):
+            1. Dispersion Curve Smoothness ('dc'):
+                Second-order finite difference of `c_t` over a selected wavelength range.
+                Normalized by `self.max_dc_smoothness`.
+            2. Model Smoothness ('model'):
+                Second-order finite difference of `model_Vs`.
+                Normalized by `self.max_model_smoothness`.
+            3. Damping to Reference:
+                Squared deviation of `model_Vs` from `damp_ref_Vs`.
+                Normalized by `self.max_damping`.
+            4. Bounds Violation:
+                Squared amount by which `c_t` exceeds upper bound (`self.c_obs_up`)
+                or falls below lower bound (`self.c_obs_low`).
+                Normalized by `self.max_bounds_violation`.
+            5. Diversity Penalty:
+                Distance in model space from previously visited models.
+                Normalized by `self.max_diversity`.
 
         Returns
         -------
         float
-            Weighted misfit value.
+            Total misfit:
+                misfit_total = base_misfit + Σ (penalty_weight * normalized_penalty)
         """
 
-        percent_errors = (np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
+        # =======================================================
+        # BASE % ERROR (in fractional form: 0–1 internally)
+        # =======================================================
+        frac_errors = np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs  # no *100 here
 
         # ---- Uncertainty weighting ----
-        if uncertainty_weighting:
+        if uncertainty_weighting and uncertainty is not None:
             uncertainty_weights = 1 / uncertainty
-            uncertainty_weights = uncertainty_weights + (np.max(uncertainty_weights)*3)
-            uncertainty_weights = uncertainty_weights / np.max(uncertainty_weights)
+            uncertainty_weights += (np.max(uncertainty_weights) * 3)
+            uncertainty_weights /= np.max(uncertainty_weights)
         else:
             uncertainty_weights = None
 
         # ---- Depth weighting ----
         if depth_weights is not None:
-            depth_weights = depth_weights / np.max(depth_weights)
-            depth_weights = depth_weights + np.max(depth_weights) * offset_const
-            depth_weights = depth_weights / np.max(depth_weights)
+            depth_weights /= np.max(depth_weights)
+            depth_weights += np.max(depth_weights) * offset_const
+            depth_weights /= np.max(depth_weights)
 
         # ---- Combine weights ----
         if uncertainty_weights is not None and depth_weights is not None:
@@ -527,116 +459,111 @@ class InvertDC():
         else:
             total_weights = None
 
-        # ---- Misfit Calculation ----
-        if mode == 'average_weighted':
-            weights_plot = True
-            weighted_percent_misfit = np.average(percent_errors, weights=total_weights)
-            misfit = weighted_percent_misfit
-        elif mode == 'average':
-            weights_plot = False
-            misfit = (1 / len(c_t)) * sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
-        elif mode == 'max_weighted':
-            weights_plot = True
-            misfit = np.max(percent_errors * total_weights)
-        elif mode == 'max':
-            weights_plot = False
-            misfit = np.max(percent_errors)
-        elif mode == 'percentile':
-            weights_plot = False
-            misfit = np.percentile(percent_errors, 90)
+        # ---- Base misfit (fractional) ----
+        if mode == "average_weighted":
+            misfit = np.average(frac_errors, weights=total_weights)
+        elif mode == "average":
+            misfit = np.mean(frac_errors)
+        elif mode == "max_weighted":
+            misfit = np.max(frac_errors * (total_weights if total_weights is not None else 1))
+        elif mode == "max":
+            misfit = np.max(frac_errors)
+        elif mode == "percentile":
+            misfit = np.percentile(frac_errors, 90)
         else:
             raise ValueError(f"Unsupported misfit mode: {mode}")
 
-        # ---- Regularisation ----
-        if regularisation == 'dc':
-            wavelengths_1third = wavelengths / 3
-            if regularisation_range is not None:
-                # Handle list of tuples
-                mask = np.zeros_like(wavelengths_1third, dtype=bool)
-                for depth_min, depth_max in regularisation_range:
-                    mask |= (wavelengths_1third >= depth_min) & (wavelengths_1third <= depth_max)
-            else:
-                mask = np.ones_like(wavelengths_1third, dtype=bool)
+        # =======================================================
+        # PENALTIES (all normalised to 0–1 before weighting)
+        # =======================================================
 
-            # 2nd-order smoothness penalty: penalizes changes in slope of velocity chang between layers
-            smoothness_penalty = np.sum(np.diff(c_t[mask], n=2)**2)
-            misfit += regularisation_weight * smoothness_penalty
-
-        # ---- Regularisation ----
-        if regularisation == 'model':
-            diffs = np.diff(model_Vs, n=2)  # second-order smoothness penalty
-
-            # cumulative top depths of layers
-            top_depths = np.cumsum(model_h)
-            top_depths = np.insert(top_depths, 0, 0)  # add surface (0 m) as first top
-
-            # compute center depths of each 3-layer window
+        # ---- Model smoothness penalty ----
+        if regularisation == "model":
+            
+            diffs = np.diff(model_Vs, n=2)
+            top_depths = np.insert(np.cumsum(model_h), 0, 0)
             depth_centers = (top_depths[:-2] + top_depths[1:-1] + top_depths[2:]) / 3
 
-            if regularisation_range is not None:
-                # Initialize full-False mask and update it for each range
-                mask = np.zeros_like(depth_centers, dtype=bool)
-                for depth_min, depth_max in regularisation_range:
-                    mask |= (depth_centers >= depth_min) & (depth_centers <= depth_max)
-                diffs = diffs[mask]
-            # else: use all diffs (no masking needed)
+            reg_penalty = 0.0
 
-            # Apply the penalty
-            reg_penalty = np.sum(diffs ** 2)
-            misfit += regularisation_weight * reg_penalty
+            if regularisation_weights is not None:
+                if regularisation_ranges is None:
+                    # Apply the first weight to all depths
+                    weight = regularisation_weights[0]
+                    reg_penalty += weight * np.sum(diffs ** 2)
+                else:
+                    # Apply weights to specified depth ranges
+                    for (depth_min, depth_max), weight in zip(regularisation_ranges, regularisation_weights):
+                        mask = (depth_centers >= depth_min) & (depth_centers <= depth_max)
+                        if np.any(mask):
+                            reg_penalty += weight * np.sum(diffs[mask] ** 2)
 
-        # ---- Damping / Deviation from reference model ----
-        if damping and damp_ref_Vs and damp_ref_h is not None:
+            self.max_model_smooth_pen = max(self.max_model_smooth_pen, reg_penalty)
+            reg_penalty_norm = reg_penalty / self.max_model_smooth_pen
+            misfit += reg_penalty_norm
+
+        # ---- Damping penalty ----
+        if damping and damping_weight > 0 and damp_ref_Vs is not None:
             diff_from_ref = model_Vs - damp_ref_Vs
-            damping_penalty = np.sum(diff_from_ref**2)
-            misfit += damping_weight * damping_penalty
+            damping_penalty = np.sum(diff_from_ref ** 2)
+            self.max_damping_pen = max(self.max_damping_pen, damping_penalty)
+            damping_penalty_norm = damping_penalty / self.max_damping_pen
+            misfit += damping_weight * damping_penalty_norm
 
-        # Penalize values outside bounds (0 penalty if within bounds)
-        if self.settings['uncert_bounds_misfit_weight'] > 0 and hasattr(self, 'c_obs_low') and hasattr(self, 'c_obs_up'):
+        # ---- Bounds violation penalty ----
+        bounds_w = self.settings.get("uncert_bounds_misfit_weight", 0)
+        if bounds_w > 0 and hasattr(self, "c_obs_low") and hasattr(self, "c_obs_up"):
             lower_violations = np.clip(self.c_obs_low - c_t, 0, None)
             upper_violations = np.clip(c_t - self.c_obs_up, 0, None)
             out_of_bounds_penalty = np.sum((lower_violations + upper_violations) ** 2)
+            self.max_bounds_pen = max(self.max_bounds_pen, out_of_bounds_penalty)
+            out_of_bounds_penalty_norm = out_of_bounds_penalty / self.max_bounds_pen
+            misfit += bounds_w * out_of_bounds_penalty_norm
 
-            bounds_penalty_weight = self.settings['uncert_bounds_misfit_weight']
-            misfit += bounds_penalty_weight * out_of_bounds_penalty
+        # ---- Diversity penalty ----
+        diversity_w = self.settings.get("rep_explore_pen_weight", 0)
+        if diversity_w > 0 and hasattr(self, "model_history") and self.model_history:
+            diversity_pen = self.diversity_penalty(model_Vs, model_h, self.model_history, vs_weight=1, h_weight=0.2)
+            self.max_diversity_pen = max(self.max_diversity_pen, diversity_pen)
+            diversity_penalty_norm = diversity_pen / self.max_diversity_pen
+            misfit += diversity_w * diversity_penalty_norm
 
-        # repulsion-based exploration penalty
-        if self.settings['rep_explore_pen_weight'] > 0 and hasattr(self, "model_history") and self.model_history:
-            diversity_pen = self.diversity_penalty(model_Vs, model_h, self.model_history, vs_weight=1, h_weight=0.1)
-            diversity_penalty_weight = self.settings['rep_explore_pen_weight']  # Tune this value
-            misfit += diversity_penalty_weight * diversity_pen
+        # =======================================================
+        # Convert final result to percentage
+        # =======================================================
+        return misfit * 100
 
-        # ---- Plot weights and regularised depths if requested ----
-        if plot_weights_file and weights_plot==True:
-            wavelengths_1third = wavelengths / 3
-            plt.figure(figsize=(8, 5))
-            if uncertainty_weights is not None and depth_weights is not None:
-                plt.plot(wavelengths_1third, uncertainty_weights, label='Uncertainty weights', marker='x')
-                plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
-                plt.plot(wavelengths_1third, total_weights, label='Total Weights', marker='x')
-            elif uncertainty_weights is not None:
-                plt.plot(wavelengths_1third, uncertainty_weights, label='Base Weights (1/uncertainty)', marker='x')
-            elif depth_weights is not None:
-                plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
+        # # ---- Plot weights and regularised depths if requested ----
+        # if plot_weights_file and weights_plot==True:
+        #     wavelengths_1third = wavelengths / 3
+        #     plt.figure(figsize=(8, 5))
+        #     if uncertainty_weights is not None and depth_weights is not None:
+        #         plt.plot(wavelengths_1third, uncertainty_weights, label='Uncertainty weights', marker='x')
+        #         plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
+        #         plt.plot(wavelengths_1third, total_weights, label='Total Weights', marker='x')
+        #     elif uncertainty_weights is not None:
+        #         plt.plot(wavelengths_1third, uncertainty_weights, label='Base Weights (1/uncertainty)', marker='x')
+        #     elif depth_weights is not None:
+        #         plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
 
-            # Highlight regularisation depth range
-            if regularisation == 'dc' and regularisation_range is not None:
-                wavelengths_1third = wavelengths / 3
-                depth_min, depth_max = regularisation_range
-                plt.axvspan(depth_min, depth_max, color='lightgray', alpha=0.4,
-                            label=f'Regularisation applied\n({depth_min}-{depth_max} m)')
+        #     # Highlight regularisation depth range
+        #     if regularisation == 'dc' and regularisation_range is not None:
+        #         wavelengths_1third = wavelengths / 3
+        #         depth_min, depth_max = regularisation_range
+        #         plt.axvspan(depth_min, depth_max, color='lightgray', alpha=0.4,
+        #                     label=f'Regularisation applied\n({depth_min}-{depth_max} m)')
             
-            plt.xlim(np.min(wavelengths_1third), np.max(wavelengths_1third))
-            plt.xlabel("1/3rd wavelength (m)")
-            plt.ylabel("Normalized Weight")
-            plt.title("Misfit weighting")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.savefig(plot_weights_file)
-            plt.close()
+        #     plt.xlim(np.min(wavelengths_1third), np.max(wavelengths_1third))
+        #     plt.xlabel("1/3rd wavelength (m)")
+        #     plt.ylabel("Normalized Weight")
+        #     plt.title("Misfit weighting")
+        #     plt.legend()
+        #     plt.grid(True)
+        #     plt.tight_layout()
+        #     plt.savefig(plot_weights_file)
+        #     plt.close()
 
-        return misfit
+        # return misfit
 
     @staticmethod
     def diversity_penalty(model_Vs, model_h, model_history, vs_weight=1.0, h_weight=0.1):
@@ -892,8 +819,8 @@ class InvertDC():
         c_t = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, initial['n'], initial['alpha'],
                                 initial['beta'], initial['rho'], initial['h'], c_test['delta_c'])
         e = self.misfit_AP(c_t, self.wavelength, initial['beta'], initial['h'], self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                            mode=self.misfit_mode, plot_weights_file=self.plot_weights_file, regularisation=self.regularisation, regularisation_weight=self.regularisation_weight, 
-                            regularisation_range=self.regularisation_range, damping=self.damping,
+                            mode=self.misfit_mode, plot_weights_file=self.plot_weights_file, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
+                            regularisation_ranges=self.regularisation_ranges, damping=self.damping,
                             damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
 
         if ax is None:
@@ -938,6 +865,7 @@ class InvertDC():
         beta_plot = self._beta_profile(initial['beta'])
         z_plot = self._h_to_z_profile(initial['h'], max_depth)
         ax[1].plot(beta_plot, z_plot, c=col, label='Initial Vs profile')
+        ax[1].scatter(beta_plot, z_plot, marker='_', s=30, c='k', zorder=5, label='Layer interfaces')
 
         ax[0].legend(frameon=False)
         ax[1].legend(frameon=False)
@@ -1069,160 +997,7 @@ class InvertDC():
         
         return beta_run, alpha_run, h_run, c_t_run, e_run
     
-    # def mc_initiation_AP(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat, 
-    #                     alpha_sat, beta_initial, rho, h_initial, 
-    #                     rev_min_depth=None, rev_max_depth=None, 
-    #                     rev_min_layer=None, rev_max_layer=None,
-    #                     bs=10, bh=10, N_max=1000):
 
-
-    #     """
-    #     Monte Carlo inversion for shear wave velocity and layer thicknesses,
-    #     with flexible velocity reversal constraints.
-
-    #     Parameters
-    #     ----------
-    #     c_vec : numpy.ndarray
-    #         Rayleigh wave phase velocity, testing values [m/s].
-    #     c_step : float
-    #         Testing Rayleigh wave phase velocity increment [m/s].
-    #     delta_c : float
-    #         Zero search initiation parameter [m/s].
-    #             At wave number k_{i} the zero search is initiated at a phase velocity 
-    #             value of c_{i-1} - delta_c, where c_{i-1} is the theoretical  
-    #             Rayleigh wave phase velocity value at wave number k_{i-1}.
-    #     n : int
-    #         Number of finite thickness layers.
-    #     n_unsat : int
-    #         Number of unsaturated (soft) soil layers. 
-    #         n_unsat = 0 for a fully saturated profile (gwt at surface).
-    #         n_unsat = 1 for an unsaturated surficial layer.
-    #         ...
-    #         n_unsat = n+1 for a fully unsaturated profile.
-    #     alpha_initial : numpy.ndarray 
-    #         Initial values for the compressional wave velocity of each layer [m/s] 
-    #         (array of size (n+1,)).
-    #     nu_unsat : float
-    #         Poisson's ratio for unsaturated soil layers.
-    #     alpha_sat : float
-    #         Compressional wave velocity for saturated soil layers [m/s].
-    #     beta_initial : numpy.ndarray 
-    #         Initial values for the shear wave velocity of each layer [m/s] 
-    #         (array of size (n+1,)).
-    #     rho : numpy.ndarray 
-    #         Mass density of each layer [kg/m^3] (array of size (n+1,)).
-    #     h_initial : numpy.ndarray 
-    #         Initial thickness of each layer [m] (array of size (n,)).
-    #     rev_min_depth : float or None
-    #         Minimum depth [m] below which velocity reversals are allowed.
-    #     rev_max_depth : float or None
-    #         Maximum depth [m] above which velocity reversals are not allowed.
-    #     rev_min_layer : int or None
-    #         Minimum layer index (inclusive) where velocity reversals are allowed.
-    #     rev_max_layer : int or None
-    #         Maximum layer index (inclusive) where velocity reversals are allowed.
-    #     bs : int or float
-    #         Shear wave velocity search-control parameter.
-    #     bh : int or float
-    #         Layer thickness search-control parameter.
-    #     N_max : int
-    #         Number of iterations.
-
-    #     Returns
-    #     -------
-    #     beta_run : list of numpy.ndarrays
-    #         List of sampled shear wave velocity arrays [m/s].
-    #     alpha_run : list of numpy.ndarrays
-    #         List of compressional wave velocity arrays [m/s].
-    #     h_run : list of numpy.ndarrays
-    #         List of sampled layer thickness arrays [m].
-    #     c_t_run : list of numpy.ndarrays
-    #         List of theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
-    #     e_run : list
-    #         List of dispersion misfit values.
-          
-    #     beta_run[i], alpha_run[i], h_run[i], c_t_run[i] and e_run[i] result 
-    #     from the i-th iteration. 
-
-    #     """        
-    #      # Initiation    
-    #     beta_run = [None] * N_max
-    #     alpha_run = [None] * N_max
-    #     h_run = [None] * N_max
-    #     c_t_run = [None] * N_max
-    #     e_run = [None] * N_max
-
-    #     # Initial misfit
-    #     c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
-    #     e_opt = self.misfit(c_t)
-    #     beta_opt = beta_initial
-    #     h_opt = h_initial
-
-    #     # Precompute cumulative depth to determine reversal bounds
-    #     layer_depths = np.concatenate([[0], np.cumsum(h_initial)])
-    #     n_layers = len(beta_initial)
-
-    #     # Determine reversal index bounds
-    #     if rev_min_layer is not None:
-    #         rev_min = rev_min_layer
-    #     elif rev_min_depth is not None:
-    #         rev_min = np.searchsorted(layer_depths, rev_min_depth, side='right') - 1
-    #     else:
-    #         rev_min = 0  # default: no reversals above surface
-
-    #     if rev_max_layer is not None:
-    #         rev_max = rev_max_layer
-    #     elif rev_max_depth is not None:
-    #         rev_max = np.searchsorted(layer_depths, rev_max_depth, side='right') - 1
-    #     else:
-    #         rev_max = n_layers - 1  # default: reversals allowed to bottom
-
-    #     rev_min = np.clip(rev_min, 0, n_layers - 1)
-    #     rev_max = np.clip(rev_max, 0, n_layers - 1)
-
-    #     # Iteration
-    #     for w in range(N_max):
-    #         # Random shear wave velocity
-    #         beta_test = beta_opt + np.random.uniform(
-    #             low=(-(bs / 100) * beta_opt),
-    #             high=((bs / 100) * beta_opt)
-    #         )
-
-    #         # Enforce reversal constraints
-    #         while (
-    #             (rev_min > 0 and (beta_test[:rev_min+1] != np.sort(beta_test[:rev_min+1])).any()) or
-    #             (rev_max < n_layers - 1 and (beta_test[rev_max+1:] != np.sort(beta_test[rev_max+1:])).any())
-    #         ):
-    #             beta_test = beta_opt + np.random.uniform(
-    #                 low=(-(bs / 100) * beta_opt),
-    #                 high=((bs / 100) * beta_opt)
-    #             )
-
-    #         # Recalculate alpha
-    #         alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
-    #         alpha_test = alpha_sat * np.ones_like(beta_test)
-    #         if n_unsat > 0:
-    #             alpha_test[:n_unsat] = alpha_unsat[:n_unsat]
-
-    #         # Sample new thicknesses
-    #         h_test = h_opt + np.random.uniform(low=(-(bh / 100) * h_opt), high=((bh / 100) * h_opt))
-
-    #         # Misfit
-    #         c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
-    #         e_test = self.misfit(c_t)
-
-    #         beta_run[w] = beta_test
-    #         h_run[w] = h_test
-    #         alpha_run[w] = alpha_test
-    #         c_t_run[w] = c_t
-    #         e_run[w] = e_test
-
-    #         if e_test <= e_opt:
-    #             e_opt = e_test
-    #             beta_opt = beta_test
-    #             h_opt = h_test
-
-    #     return beta_run, alpha_run, h_run, c_t_run, e_run
     
     def mc_initiation_AP(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat,
                     alpha_sat, beta_initial, rho, h_initial,
@@ -1249,8 +1024,8 @@ class InvertDC():
         # Initial model
         c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
         e_opt = self.misfit_AP(c_t, self.wavelength,  beta_initial, h_initial, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                                mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weight=self.regularisation_weight, 
-                                regularisation_range=self.regularisation_range, damping=self.damping,
+                                mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
+                                regularisation_ranges=self.regularisation_ranges, damping=self.damping,
                                 damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
         e_initial = e_opt
         beta_opt = beta_initial
@@ -1310,6 +1085,11 @@ class InvertDC():
                     if rev_max < n_layers - 1:
                         valid &= is_monotonic(beta_test[rev_max + 1:], increasing=True, tol=monotonic_tol)
 
+                    
+                    # If rev_min/max are None or default full-profile, check entire profile
+                    if rev_min == 0 and rev_max == n_layers - 1:
+                        valid &= is_monotonic(beta_test, increasing=True, tol=monotonic_tol)
+
                     if valid:
                         break
                 else:
@@ -1342,8 +1122,8 @@ class InvertDC():
             # Evaluate model
             c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
             e_test = self.misfit_AP(c_t, self.wavelength, beta_test, h_test, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                                    mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weight=self.regularisation_weight, 
-                                    regularisation_range=self.regularisation_range, damping=self.damping,
+                                    mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
+                                    regularisation_ranges=self.regularisation_ranges, damping=self.damping,
                                     damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
 
 
@@ -1390,163 +1170,6 @@ class InvertDC():
             print(f"\nIteration fail count: {iter_fail_count}/{N_max}")
 
         return beta_run, alpha_run, h_run, c_t_run, e_run, np.array(bs_run), np.array(bh_run)
-
-    
-    
-
-    # def mc_inversion_AP(self, c_test, initial, settings, force_monotonic):
-    
-    #     """
-    #     Monte Carlo based inversion for shear wave velocity and layer thicknesses. 
-    #     The sampling scheme is initiated "run" number of times starting from the 
-    #     initially specified layered soil model.
-        
-    #     Parameters
-    #     ----------
-    #     c_test : dict
-    #         Dictionary containing information on testing Rayleigh wave phase
-    #         velocity values.        
-            
-    #         c_test['min'] : float
-    #             Minimum testing Rayleigh wave phase velocity [m/s].
-    #         c_test['max'] : float
-    #             Maximum testing Rayleigh wave phase velocity [m/s].
-    #         c_test['step'] : float
-    #             Testing Rayleigh wave phase velocity increment [m/s].
-    #         c_test['delta_c'] : float
-    #             Zero search initiation parameter [m/s].
-    #             At wave number k_{i} the zero search is initiated at a phase velocity 
-    #             value of c_{i-1} - c_test['delta_c'], where c_{i-1} is the theoretical  
-    #             Rayleigh wave phase velocity value at wave number k_{i-1}.
-        
-    #     initial : dict
-    #         Dictionary containing information on model parameterization and 
-    #         initial values for the testing shear wave velocity profile.
-        
-    #         initial['n'] : int
-    #             Number of finite thickness layers.
-    #         initial['n_unsat'] : int
-    #             Number of unsaturated (soft) soil layers. 
-    #             initial['n_unsat'] = 0 for a fully saturated profile (gwt at surface).
-    #             initial['n_unsat'] = 1 for an unsaturated surficial layer.
-    #             ...
-    #             initial['n_unsat'] = n+1 for a fully unsaturated profile.
-    #         initial['alpha'] : numpy.ndarray 
-    #             Initial values for the compressional wave velocity of each layer [m/s] 
-    #             (array of size (n+1,)).
-    #         initial['nu_unsat'] : float
-    #             Poisson's ratio for unsaturated soil layers.
-    #         initial['alpha_sat'] : float
-    #             Compressional wave velocity for saturated soil layers [m/s].
-    #         initial['beta'] : numpy.ndarray 
-    #             Initial values for the shear wave velocity of each layer [m/s] 
-    #             (array of size (n+1,)).
-    #         initial['rho'] : numpy.ndarray 
-    #             Mass density of each layer [kg/m^3] (array of size (n+1,)).
-    #         initial['h'] : numpy.ndarray 
-    #             Initial thickness of each layer [m] (array of size (n,)).
-    #         initial['reversals'] : int
-    #             Number of layer interfaces (counted from the surface) where 
-    #             velocity reversals are permitted.
-    #             initial['reversals'] = 0 for a normally dispersive profile.
-    #             initial['reversals'] = 1 for allowing velocity reversals at the first layer interface.
-    #             ...
-        
-    #     settings : dict
-    #         Dictionary containing information on search-control parameter values
-    #         and general settings of the sampling scheme. See further in 
-    #         Olafsdottir et al. (2020), https://doi.org/10.3390/geosciences10080322
-        
-    #         settings['run'] : int
-    #             Number of initiations.
-    #         settings['bs'] : int or float
-    #             Shear wave velocity search-control parameter. 
-    #         settings['bh'] : int or float
-    #             Layer thickness search-control parameter.
-    #         settings['N_max'] : int
-    #             Number of iterations.
-
-    #     Returns
-    #     -------
-    #     profiles : dict 
-    #         Dictionary containing the sampled shear wave velocity profiles 
-    #         and the associated theoretical dispersion curves/dispersion
-    #         misfit values.
-            
-    #         profiles['n_layers'] : int
-    #             Number of finite thickness layers.
-    #         profiles['beta'] : list
-    #             Sampled shear wave velocity arrays [m/s].
-    #             profiles['beta'][i] is a list of sampled shear wave velocity arrays
-    #             (numpy.ndarrays) resulting from the i-th run of the algorithm.
-    #         profiles['alpha'] : list
-    #             Compressional wave velocity arrays [m/s].
-    #             profiles['alpha'][i] is a list of compressional wave velocity arrays
-    #             (numpy.ndarrays) resulting from the i-th run of the algorithm.
-    #         profiles['h'] : list          
-    #             Sampled layer thickness arrays [m]. 
-    #             profiles['h'][i] is a list of sampled layer thickness arrays
-    #             (numpy.ndarrays) resulting from the i-th run of the algorithm.
-    #         profiles['c_t'] : list 
-    #             Theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
-    #             profiles['c_t'][i] is a list of theoretical Rayleigh wave phase 
-    #             velocity values (numpy.ndarrays) resulting from the i-th run 
-    #             of the algorithm.
-    #         profiles['misfit'] : list 
-    #             Dispersion misfit values.
-    #             profiles['misfit'][i] is a list of dispersion misfit values 
-    #             resulting from the i-th run of the algorithm.
-                
-    #     """       
-    #     # Testing range for Rayleigh wave phase velocity [m/s]
-    #     c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64)
-        
-    #     # Initiate lists for temporarily storing sampled shear wave velocity 
-    #     # profiles and associated dispersion curves/dispersion misfit values
-    #     run = settings['run']
-    #     beta_all = [None for i in range(run)]
-    #     alpha_all = [None for i in range(run)]
-    #     h_all = [None for i in range(run)]
-    #     c_t_all = [None for i in range(run)]
-    #     e_all = [None for i in range(run)]
-        
-    #     # Check input parameters
-    #     initial['alpha'] = self._check_length(initial['n']+1, initial['alpha'], 'alpha_initial')
-    #     initial['beta'] = self._check_length(initial['n']+1, initial['beta'], 'beta_initial')
-    #     initial['rho'] = self._check_length(initial['n']+1, initial['rho'], 'rho')
-    #     initial['h'] = self._check_length(initial['n'], initial['h'], 'h_initial')
-
-    #     # additional models shifted by constant velocity
-    #     vel_shift = settings['vel_shift']      
-    #     n_initial_models = settings['n_initial_models']
-
-    #     vel_shift_array = np.linspace(0,n_initial_models-1,n_initial_models)*vel_shift
-    #     middle_index = len(vel_shift_array) // 2
-    #     vel_shift_array = vel_shift_array-vel_shift_array[middle_index]
-        
-    #     # Iteration (´run´ initiations)
-    #     for i in range(run):
-
-    #         print(f'\nRun no. {i+1}/{run} started.')
-    #         temp = self.mc_initiation_AP(c_vec, c_test['step'], c_test['delta_c'], initial['n'], 
-    #                             initial['n_unsat'], initial['alpha'], initial['nu_unsat'], 
-    #                             initial['alpha_sat'], initial['beta'], initial['rho'], initial['h'],
-    #                             initial['rev_min_depth'], initial['rev_max_depth'], 
-    #                             initial['rev_min_layer'], initial['rev_max_layer'],
-    #                             settings['bs'], settings['bh'], settings['b_min'], settings['b_alpha'], settings['b_decay'], 
-    #                             settings['N_max'], settings['max_retries'], settings['monotonic_tol'], force_monotonic)
-
-            
-    #         beta_all[i], alpha_all[i], h_all[i], c_t_all[i], e_all[i] = temp
-    #         print(f'Run no. {i+1}/{run} completed.')
-        
-    #     # Return to inversion analysis object
-    #     self.profiles['n_layers'] = initial['n']
-    #     self.profiles['beta'] = beta_all
-    #     self.profiles['alpha'] = alpha_all
-    #     self.profiles['h'] = h_all
-    #     self.profiles['c_t'] = c_t_all
-    #     self.profiles['misfit'] = e_all
 
    
     
@@ -2084,7 +1707,8 @@ class InvertDC():
             return fig, ax
    
     def plot_sampled_AP(self, max_depth, runs='all', figwidth=16, figheight=12, col_map='viridis', 
-                    colorbar=True, DC_yaxis='linear', return_axes=False, show_exp_dc=True, pseudo_depth=False, plot_mean_exp_dc=True):
+                    colorbar=True, DC_yaxis='linear', return_axes=False, show_exp_dc=True, pseudo_depth=False, 
+                    plot_mean_exp_dc=True, axis_limits= None):
         """
         Plot sampled shear wave velocity profiles (as interval velocity profiles) 
         and the corresponding theoretical dispersion curves. The shear wave 
@@ -2161,8 +1785,11 @@ class InvertDC():
             ax[0].plot(self.c_obs_up, y_vals, '--', color='k')
         
         # Axes labels and limits 
-        ax[0].set_xlim(s.round_down_to_nearest(np.min(c_sort) - 10, 20),
-                    s.round_up_to_nearest(np.max(c_sort) + 10, 20))
+        if axis_limits:
+            ax[0].set_xlim(axis_limits[0][0],axis_limits[0][1])
+        else:
+            ax[0].set_xlim(s.round_down_to_nearest(np.min(c_sort) - 10, 20),
+                        s.round_up_to_nearest(np.max(c_sort) + 10, 20))
         #ax[0].set_xlim(c_test["min"], c_test["max"])
 
         ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
@@ -2170,7 +1797,10 @@ class InvertDC():
         
         # Y-axis scaling and limits
         if isinstance(DC_yaxis, str) and DC_yaxis.lower() == 'linear':
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(y_vals), 5))
+            if axis_limits:
+                ax[0].set_ylim(axis_limits[1][0],axis_limits[1][1])
+            else:
+                ax[0].set_ylim(0, s.round_up_to_nearest(max(y_vals), 5))
             ax[0].set_yscale('linear')
         elif isinstance(DC_yaxis, str) and DC_yaxis.lower() == 'log':
             ax[0].set_ylim(max(s.round_down_to_nearest(min(y_vals), 0.1), 0.1),
@@ -2190,14 +1820,21 @@ class InvertDC():
         s.plot_lines(beta_plot, z_plot, list(range(no_profiles)), ax=ax[1], cmap=col_map, lw=0.4)  
         
         # Axes labels and limits 
-        ax[1].set_xlim(s.round_down_to_nearest(np.min(beta_sort) - 10, 20),
-                    s.round_up_to_nearest(np.max(beta_sort) + 10, 20))
-        ax[0].set_ylim(max_depth, 0)
-        ax[1].set_ylim(0, max_depth)
+        if axis_limits:
+            ax[0].set_xlim(axis_limits[0][0],axis_limits[0][1])
+            ax[1].set_xlim(axis_limits[2][0],axis_limits[2][1])
+            ax[0].set_ylim(axis_limits[1][0],axis_limits[1][1])
+            ax[1].set_ylim(axis_limits[3][0],axis_limits[3][1])
+        else:
+            ax[1].set_xlim(s.round_down_to_nearest(np.min(c_sort) - 10, 20),
+                        s.round_up_to_nearest(np.max(c_sort) + 10, 20))
+            ax[0].set_ylim(max_depth, 0)
+            ax[1].set_ylim(0, max_depth)
         ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
         ax[1].set_ylabel('Depth [m]', fontweight='bold')
                 
         # Figure appearance
+        ax[0].invert_yaxis()
         ax[1].invert_yaxis() 
         ax[1].grid(color='gainsboro', linestyle=':')
         
@@ -2590,7 +2227,7 @@ class InvertDC():
         
     def plot_within_boundaries_AP(self, max_depth, c_test, threshold, show_all=True, runs='all', figwidth=16, figheight=12, 
                             col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=False, 
-                            pseudo_depth=True, **kwargs):
+                            pseudo_depth=True, axis_limits=None, **kwargs):
         """
         Plot sampled profiles whose theoretical dispersion curves fall 
         within the upper and lower boundaries of the experimental data. 
@@ -2657,7 +2294,7 @@ class InvertDC():
             newcmp = ListedColormap(np.array([0.8, 0.8, 0.8, 1]))
             fig, ax = self.plot_sampled_AP(max_depth, runs=runs, figwidth=figwidth, figheight=figheight,
                                         col_map=newcmp, colorbar=False, DC_yaxis=DC_yaxis,
-                                        return_axes=True, show_exp_dc=False, pseudo_depth=pseudo_depth)
+                                        return_axes=True, show_exp_dc=False, pseudo_depth=pseudo_depth, axis_limits=axis_limits)
             ax0_x0, ax0_x1 = ax[0].get_xlim()
             ax1_x0, ax1_x1 = ax[1].get_xlim()
         else:
@@ -2703,6 +2340,14 @@ class InvertDC():
                         s.round_up_to_nearest(max(self.c_obs_up) + 10, 20))
             ax[1].set_xlim(s.round_down_to_nearest(np.min(beta_plot) - 10, 20),
                         s.round_up_to_nearest(np.max(beta_plot) + 10, 20))
+            
+        if axis_limits:
+            ax[0].set_xlim(axis_limits[0][0],axis_limits[0][1])
+            ax[1].set_xlim(axis_limits[2][0],axis_limits[2][1])
+            ax[0].set_ylim(axis_limits[1][0],axis_limits[1][1])
+            ax[1].set_ylim(axis_limits[3][0],axis_limits[3][1])
+            ax[0].invert_yaxis()
+            ax[1].invert_yaxis()
 
         if colorbar:
             relative_tick_locations = [0, 0.25, 0.5, 0.75, 1]
@@ -3094,7 +2739,8 @@ class InvertDC():
             return c_t
         
     def plot_profile_AP(self, profile, max_depth, c_test, initial, col='crimson', up_low=False, DC_yaxis='linear', 
-                    fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True, figwidth=16, figheight=12):
+                    fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True, figwidth=16, figheight=12, 
+                    axis_limits=None):
         """
         Plot the median or mean shear wave velocity profile. The associated 
         theoretical dispersion curve is computed and compared to the experimental
@@ -3242,6 +2888,15 @@ class InvertDC():
             ax[0].set_yscale('linear')
             warnings.warn('Scale of wavelength axis (DC_yaxis) not recognized. '
                         'Dispersion curves displayed on a linear pseudodepth scale (default setting).')
+            
+        if axis_limits:
+            ax[0].set_xlim(axis_limits[0][0],axis_limits[0][1])
+            ax[1].set_xlim(axis_limits[2][0],axis_limits[2][1])
+            ax[0].set_ylim(axis_limits[1][0],axis_limits[1][1])
+            ax[1].set_ylim(axis_limits[3][0],axis_limits[3][1])
+            ax[0].invert_yaxis()
+            ax[1].invert_yaxis()
+
 
         if show_legend:
             ax[0].legend(frameon=False)

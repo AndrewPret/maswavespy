@@ -663,7 +663,7 @@ class CombineDCs():
         plt.legend(loc='lower left', frameon=False)
         fig.set_tight_layout(True)
 
-    def plot_combined_dc_AP(self, plot_all=False, figwidth=10, figheight=15, col='navy', pointcol='darkgray', pseudo_depth=False):
+    def plot_combined_dc_AP(self, plot_all=False, figwidth=12, figheight=18, col='navy', pointcol='darkgray', pseudo_depth=False, axis_limits=None):
         """
         Plot the composite experimental dispersion curve and its upper/lower 
         boundary curves. Optionally convert the y-axis to pseudo-depth (1/3 wavelength).
@@ -706,7 +706,7 @@ class CombineDCs():
 
         # Plot elementary data points if requested
         if plot_all:
-            ax.plot(self.c, self.wavelengths * scale, 'o', ms=4, color=pointcol, label='Data points')
+            ax.plot(self.c, self.wavelengths * scale, 'x', ms=3, color=pointcol, label='Data points')
 
         # Plot mean and bounds
         ax.plot(self.combined['c_mean'], self.combined['wavelength'] * scale, '-', color=col, lw=1, label='Mean')
@@ -714,12 +714,23 @@ class CombineDCs():
         ax.plot(self.combined['c_low'], self.combined['wavelength'] * scale, '-.', color=col, lw=1)
 
         # Set axis limits
-        ax.set_xlim(
-            s.round_down_to_nearest(min(self.combined['c_low']), 25),
-            s.round_up_to_nearest(max(self.combined['c_up']), 25)
-        )
-        ax.set_ylim(y_lim_low, y_lim_high)
-        ax.invert_yaxis()
+        if axis_limits:
+            ax.set_xlim(
+                axis_limits[0][0],
+                axis_limits[0][1]
+            )
+            ax.set_ylim(                
+                axis_limits[1][0],
+                axis_limits[1][1]
+            )
+            ax.invert_yaxis()
+        else:
+            ax.set_xlim(
+                s.round_down_to_nearest(min(self.combined['c_low']), 25),
+                s.round_up_to_nearest(max(self.combined['c_up']), 25)
+            )
+            ax.set_ylim(y_lim_low, y_lim_high)
+            ax.invert_yaxis()
 
         # Labels and grid
         ax.set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
@@ -827,10 +838,10 @@ class CombineDCs():
     
         print('Composite DC (wavelength domain) resampled at ' + str(no_points) + space_print + ' points between wavelengths of ' + str(wavelength_min) + ' m and ' + str(wavelength_max) + ' m.')
 
-    def resample_dc_AP(self, space='log', no_points=30, smoothing=False, wavelength_min='default', wavelength_max='default', show_fig=True, pseudo_depth=False):
+    def resample_dc_AP(self, resample_n=30, space='log', smoothing=False, wavelength_min='default', wavelength_max='default', show_fig=True, pseudo_depth=False, axis_limits=None):
         """
         Resample the composite experimental dispersion curve and its upper and 
-        lower boundary curves at no_points logarithmically or linearly spaced points 
+        lower boundary curves at resample_n logarithmically or linearly spaced points 
         within the interval of [wavelength_min, wavelength_max]. By default, 
         wavelength_min = combined['wavelength'][0] and wavelength_max = combined['wavelength'][-1]. 
         Visually compare the original and resampled dispersion curves (optional).
@@ -843,7 +854,7 @@ class CombineDCs():
             Minimum wavelength for resampling.
         wavelength_max : 'default', float or int
             Maximum wavelength for resampling.
-        no_points : int, optional
+        resample_n : int, optional
             Number of sample points.
         show_fig : bool, optional
             Plot the original and resampled dispersion curves.
@@ -866,18 +877,22 @@ class CombineDCs():
 
         wavelength_min = self._check_wavelength(wavelength_min, 'min')
         wavelength_max = self._check_wavelength(wavelength_max, 'max')
+        if wavelength_max == None or wavelength_min == None:
+            return None, None
 
         if space.lower() == 'log':
-            lambda_interp = np.round(np.geomspace(wavelength_min, wavelength_max, num=no_points, endpoint=True), 4)
+            lambda_interp = np.round(np.geomspace(wavelength_min, wavelength_max, num=resample_n, endpoint=True), 4)
             space_print = ' logarithmically spaced'
         else:
-            lambda_interp = np.round(np.linspace(wavelength_min, wavelength_max, num=no_points, endpoint=True), 4)
+            lambda_interp = np.round(np.linspace(wavelength_min, wavelength_max, num=resample_n, endpoint=True), 4)
             space_print = ' linearly spaced'
 
         self.resampled['wavelength'] = lambda_interp
         self.resampled['c_mean'] = f_dc_mean(lambda_interp)
         self.resampled['c_low'] = f_dc_low(lambda_interp)
         self.resampled['c_up'] = f_dc_up(lambda_interp)
+
+
 
         if smoothing:
             self.resampled['c_mean'] = gaussian_filter(self.resampled['c_mean'], sigma=1)
@@ -887,20 +902,20 @@ class CombineDCs():
 
         # Plot - visually compare original and resampled dispersion curves
         if show_fig:
-            fig, ax = self.plot_combined_dc_AP(pseudo_depth=pseudo_depth)
+            fig, ax = self.plot_combined_dc_AP(pseudo_depth=pseudo_depth, axis_limits=axis_limits)
 
             # Apply scaling for pseudo-depth
             scale = 1 / 3 if pseudo_depth else 1
             y_resampled = lambda_interp * scale
             y_label = 'Pseudo-depth (λ/3) [m]' if pseudo_depth else 'Wavelength [m]'
 
-            ax.plot(self.resampled['c_mean'], y_resampled, 'o', ms=4, c='red', label='Mean (resampled)')
-            ax.plot(self.resampled['c_low'], y_resampled, 'o', ms=4, markerfacecolor='None', markeredgecolor='red', label='Upper/lower (resampled)')
-            ax.plot(self.resampled['c_up'], y_resampled, 'o', ms=4, markerfacecolor='None', markeredgecolor='red')
+            ax.plot(self.resampled['c_mean'], y_resampled, 'x', ms=3, c='red', label='Mean (resampled)')
+            ax.plot(self.resampled['c_low'], y_resampled, 'x', ms=3, markerfacecolor='None', markeredgecolor='red', label='Upper/lower (resampled)')
+            ax.plot(self.resampled['c_up'], y_resampled, 'x', ms=3, markerfacecolor='None', markeredgecolor='red')
             ax.set_ylabel(y_label, fontweight='bold')
             ax.legend(loc='lower left', frameon=False)
 
-        print(f"Composite DC (wavelength domain) resampled at {no_points}{space_print} points between wavelengths of {wavelength_min} m and {wavelength_max} m.")
+        print(f"Composite DC (wavelength domain) resampled at {resample_n}{space_print} points between wavelengths of {wavelength_min} m and {wavelength_max} m.")
 
         return fig, ax
    
@@ -946,11 +961,19 @@ class CombineDCs():
             if wavelength_value < min(np.round(self.combined['wavelength'],4)):
                 min_value = min(np.round(self.combined['wavelength'],4))
                 message = f'The value specified for ´wavelength_min´ is outside the wavelength range of the calculated composite DC. Its minimum wavelength is {min_value} m.'
-                raise ValueError(message)
+                print(message)
+                print("The value for ´wavelength_min´ has been changed to the minimum of picked wavelengths")
+                wavelength_value = min_value
+                return wavelength_value
+                #raise ValueError(message)
         if boundary == 'max':
             if wavelength_value > max(np.round(self.combined['wavelength'],4)):
                 max_value = max(np.round(self.combined['wavelength'],4))
                 message = f'The value specified for ´wavelength_max´ is outside the wavelength range of the calculated composite DC. Its maximum wavelength is {max_value} m.'
-                raise ValueError(message)               
+                print(message)
+                print("The value for ´wavelength_max´ has been changed to the maximum of picked wavelengths")
+                wavelength_value = max_value
+                return wavelength_value
+                #raise ValueError(message)               
 
         return wavelength_value
