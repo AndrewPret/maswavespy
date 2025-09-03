@@ -2,7 +2,7 @@
 
 MASWavesPy (`maswavespy`) is a Python package for processing and inverting MASW data, developed at the Faculty of Civil and Environmental Engineering, University of Iceland. 
 
-### Table of contents
+### Table of contents 
 - [About MASWavesPy](#about-maswavespy)
   - [Referencing MASWavesPy](#referencing-maswavespy)
   - [License](#license)
