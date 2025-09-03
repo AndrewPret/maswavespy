@@ -895,9 +895,14 @@ class CombineDCs():
 
 
         if smoothing:
-            self.resampled['c_mean'] = gaussian_filter(self.resampled['c_mean'], sigma=1)
-            self.resampled['c_low'] = gaussian_filter(self.resampled['c_low'], sigma=1)
-            self.resampled['c_up'] = gaussian_filter(self.resampled['c_up'], sigma=1)
+            # self.resampled['c_mean'] = gaussian_filter(self.resampled['c_mean'], sigma=1, truncate=1 )
+            # self.resampled['c_low'] = gaussian_filter(self.resampled['c_low'], sigma=1, truncate=1 )
+            # self.resampled['c_up'] = gaussian_filter(self.resampled['c_up'], sigma=1, truncate=1 )
+            # Example usage for your three lines:
+            for key in ['c_mean', 'c_low', 'c_up']:
+                self.resampled[key] = self.smooth_with_extrapolation(
+                    self.resampled[key], sigma=1, truncate=2, n_extra=2
+                )
 
 
         # Plot - visually compare original and resampled dispersion curves
@@ -977,3 +982,37 @@ class CombineDCs():
                 #raise ValueError(message)               
 
         return wavelength_value
+    
+    def smooth_with_extrapolation(self, arr, sigma=1, truncate=2, n_extra=1):
+        """
+        Smooth 1D array using Gaussian filter but anchor endpoints via linear extrapolation.
+        
+        Parameters
+        ----------
+        arr : 1D array
+            Original data to smooth.
+        sigma : float
+            Gaussian sigma.
+        truncate : float
+            Gaussian truncate parameter.
+        n_extra : int
+            Number of points to extrapolate at each end.
+        """
+        arr = np.asarray(arr)
+
+        # linear extrapolation at start
+        start_slope = arr[1] - arr[0]
+        start_extrap = arr[0] + start_slope * np.arange(-n_extra, 0, 1)
+
+        # linear extrapolation at end
+        end_slope = arr[-1] - arr[-2]
+        end_extrap = arr[-1] + end_slope * np.arange(1, n_extra + 1)
+
+        # concatenate extrapolated points
+        extended = np.concatenate([start_extrap, arr, end_extrap])
+
+        # apply Gaussian filter
+        smoothed = gaussian_filter(extended, sigma=sigma, truncate=truncate)
+
+        # remove the extrapolated points
+        return smoothed[n_extra:-n_extra]

@@ -44,6 +44,7 @@ MASWaves (MATLAB implementation)
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
+from scipy.ndimage import gaussian_filter
 
 from maswavespy import supplemental as s
 from maswavespy.select_dc import SelectDC
@@ -178,7 +179,8 @@ class ElementDC():
         self.c0 = None
 
 
-    def plot_dispersion_image(self, f_min, f_max, replace_transform=None, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, tight_layout=True):
+    def plot_dispersion_image(self, f_min, f_max, replace_transform=None, col_map='jet', resolution=100, figwidth=14, figheight=8, fig=None, ax=None, 
+                                tight_layout=True, smoothing=None):
     
         """           
         Plot the two-dimensional dispersion image (phase velocity spectrum) 
@@ -263,7 +265,18 @@ class ElementDC():
             ax = plt.gca()
         
         # Plot spectral image
-        cf = ax.contourf(self.fplot, self.cplot, self.Aplot, resolution, cmap=col_map)
+        if smoothing:
+            # Smooth the amplitude (Z) data
+            Aplot_smooth = gaussian_filter(self.Aplot, sigma=smoothing)  # adjust sigma for more/less smoothing
+            # normalise Aplot per frequency
+            for i in range(Aplot_smooth.shape[0]):
+                max_val = np.max(Aplot_smooth[i, :])
+                if max_val != 0:
+                    Aplot_smooth[i, :] /= max_val
+            cf = ax.contourf(self.fplot, self.cplot, Aplot_smooth,
+                            resolution, cmap=col_map)
+        else:
+            cf = ax.contourf(self.fplot, self.cplot, self.Aplot, resolution, cmap=col_map)
         cb = fig.colorbar(cf, ax=ax, ticks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0], orientation='vertical')
         cb.set_label('Normalized amplitude', fontweight='bold')
         
@@ -387,7 +400,7 @@ class ElementDC():
         ax.grid(color='lightgray', linestyle=':')
         fig.set_tight_layout(tight_layout)
 
-    def find_spectral_maxima(self):
+    def find_spectral_maxima(self, smoothing):
     
         """
         Identify spectral maxima at frequencies higher than f_pick_min.
@@ -405,27 +418,77 @@ class ElementDC():
         """           
         # Normalize slant-stacked amplitudes at each frequency
         Anorm = np.zeros(np.shape(self.Aplot))
-        for i in range(self.Aplot.shape[0]):
-            Anorm[i,:] = self.Aplot[i,:] / (np.amax(self.Aplot[i,:]))
+        if smoothing:
+            # Smooth the amplitude (Z) data
+            Aplot_smooth = gaussian_filter(self.Aplot, sigma=smoothing)  # adjust sigma for more/less smoothing
+            for i in range(Aplot_smooth.shape[0]):
+                Anorm[i,:] = Aplot_smooth[i,:] / (np.amax(Aplot_smooth[i,:]))
+
+            # For each frequency, find indices of top 2 amplitudes
+            delta_c_min = 100  # user-defined minimum velocity separation
+
+            Amax_fvec = []
+            Amax_cvec = []
+
+            for i_f in range(Anorm.shape[0]):  # loop over frequencies
+                row = Anorm[i_f, :]
+                
+                # First maximum
+                idx1 = np.argmax(row)
+                f1 = self.fplot[i_f, idx1]
+                c1 = self.cplot[i_f, idx1]
+                
+                if f1 <= self.f_pick_min:
+                    continue  # skip if below fmin cutoff
+                
+                Amax_fvec.append(f1)
+                Amax_cvec.append(c1)
+                
+                # Mask out velocities too close to the first max
+                vel_diff = np.abs(self.cplot[i_f, :] - c1)
+                valid_mask = vel_diff >= delta_c_min
+                
+                if np.any(valid_mask):
+                    idx2 = np.argmax(row[valid_mask])
+                    global_idx2 = np.where(valid_mask)[0][idx2]
+                    f2 = self.fplot[i_f, global_idx2]
+                    c2 = self.cplot[i_f, global_idx2]
+                    
+                    if f2 > self.f_pick_min:
+                        Amax_fvec.append(f2)
+                        Amax_cvec.append(c2)
+
+            # Convert to arrays and sort by frequency
+            Amax_fvec = np.array(Amax_fvec)
+            Amax_cvec = np.array(Amax_cvec)
+
+            idx_sort = np.argsort(Amax_fvec)
+            Amax_fvec = Amax_fvec[idx_sort]
+            Amax_cvec = Amax_cvec[idx_sort]
         
-        # Identify spectral maxima
-        f_loc, c_loc = np.where(Anorm == 1)        
-        Amax_fvec = np.zeros(len(f_loc))
-        Amax_cvec = np.zeros(len(c_loc))
-        for i in range(len(f_loc)):
-            Amax_fvec[i] = self.fplot[f_loc[i],1]
-            Amax_cvec[i] = self.cplot[1,c_loc[i]]
-        
-        # Locate the spectral maximum at each frequency higher then f_pick_min
-        ii = np.where(Amax_fvec > self.f_pick_min) 
-        Amax_fvec = Amax_fvec[ii]
-        Amax_cvec = Amax_cvec[ii]
-        
-        # Sort in order of increasing frequency
-        index_array = np.argsort(Amax_fvec)
-        Amax_fvec = Amax_fvec[index_array]
-        Amax_cvec = Amax_cvec[index_array]
-        
+        else:
+            for i in range(self.Aplot.shape[0]):
+                Anorm[i,:] = self.Aplot[i,:] / (np.amax(self.Aplot[i,:]))
+
+            # Identify spectral maxima
+            f_loc, c_loc = np.where(Anorm == 1)        
+            Amax_fvec = np.zeros(len(f_loc))
+            Amax_cvec = np.zeros(len(c_loc))
+            for i in range(len(f_loc)):
+                Amax_fvec[i] = self.fplot[f_loc[i],1]
+                Amax_cvec[i] = self.cplot[1,c_loc[i]]
+            
+            # Locate the spectral maximum at each frequency higher then f_pick_min
+            ii = np.where(Amax_fvec > self.f_pick_min) 
+            Amax_fvec = Amax_fvec[ii]
+            Amax_cvec = Amax_cvec[ii]
+            
+            # Sort in order of increasing frequency
+            index_array = np.argsort(Amax_fvec)
+            Amax_fvec = Amax_fvec[index_array]
+            Amax_cvec = Amax_cvec[index_array]
+    
+
         return (Amax_fvec, Amax_cvec)
 
 
@@ -531,7 +594,7 @@ class ElementDC():
         
     
     def pick_dc(self, f_min, f_max, window=None, prev_sect_picks=None, prev_trans_picks=None, replace_transform=False, 
-                transform='phase-shift', section=None):
+                transform='phase-shift', section=None, smoothing=None):
 
         """
         Identify (elementary) dispersion curves from multi-channel 
@@ -549,7 +612,7 @@ class ElementDC():
         # Open GUI
         app = SelectDC(self, f_min, f_max, window=window, master=tk.Tk(), prev_sect_picks=prev_sect_picks, 
                         prev_trans_picks=prev_trans_picks, replace_transform=replace_transform, 
-                        transform=transform, section=section)
+                        transform=transform, section=section, smoothing=smoothing)
         app.mainloop()
         
 

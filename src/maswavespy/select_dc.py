@@ -304,7 +304,8 @@ class SelectDC(tk.Frame):
     """
         
     def __init__(self, ElementDC, f_min, f_max, window=None, master=None, prev_sect_picks=None, 
-                    prev_trans_picks=None, replace_transform=False, transform='phase-shift', section=None):
+                    prev_trans_picks=None, replace_transform=False, transform='phase-shift', 
+                    section=None, smoothing=None):
         
         """
         Initialize a dispersion curve selection object.
@@ -357,7 +358,8 @@ class SelectDC(tk.Frame):
         self.widgets_save_selection()
         
         # Plot dispersion image
-        self.view_dispersion_image(prev_sect_picks=prev_sect_picks, prev_trans_picks=prev_trans_picks, replace_transform=replace_transform)
+        self.view_dispersion_image(prev_sect_picks=prev_sect_picks, prev_trans_picks=prev_trans_picks, 
+                                    replace_transform=replace_transform, smoothing=smoothing)
         
         # Status of start-selection buttons
         self.select_ids = False
@@ -448,7 +450,8 @@ class SelectDC(tk.Frame):
 #   Plot dispersion image
 # =============================================================================
 
-    def view_dispersion_image(self, prev_sect_picks=None, prev_trans_picks=None, replace_transform=False):
+    def view_dispersion_image(self, prev_sect_picks=None, prev_trans_picks=None,
+                                replace_transform=False, smoothing=None):
         
         """
         Plot dispersion image and show the spectral maximum at each frequency.
@@ -461,7 +464,7 @@ class SelectDC(tk.Frame):
                 
         # Plot dispersion image 
         self.elementdc.plot_dispersion_image(self.f_min, self.f_max, replace_transform=replace_transform, col_map='jet',  
-                                            fig=fig, ax=self.ax0, tight_layout=False)
+                                            fig=fig, ax=self.ax0, tight_layout=False, smoothing=smoothing)
         
         # add previous picks for reference
         if prev_sect_picks:
@@ -469,7 +472,7 @@ class SelectDC(tk.Frame):
             for i in range(len(prev_sect_picks[0])):
                 f_picks_prev_sect = prev_sect_picks[0][i]
                 c_picks_prev_sect = prev_sect_picks[1][i]
-                self.ax0.scatter(f_picks_prev_sect, c_picks_prev_sect, marker='o', alpha=alpha_list[i], edgecolors='black', label='previous section picks')
+                self.ax0.scatter(f_picks_prev_sect, c_picks_prev_sect, marker='o', s=8, alpha=alpha_list[i], edgecolors='black', label='previous section picks')
 
         if prev_trans_picks:
             for i in range(len(prev_trans_picks[0])):
@@ -482,7 +485,7 @@ class SelectDC(tk.Frame):
 
     
         # Plot spectral maxima
-        Amax = self.elementdc.find_spectral_maxima()
+        Amax = self.elementdc.find_spectral_maxima(smoothing=smoothing)
         self.elementdc.Amax = Amax
         self.ax0.paths_maxima = []
         self.ax0.paths_maxima.append(self.elementdc.plot_spectral_maxima(Amax, ax=self.ax0, return_paths=True, edgecolor='k', color='k', point_size=5))

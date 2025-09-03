@@ -846,7 +846,7 @@ class InvertDC():
                 s.round_down_to_nearest(min(min(c_t), min(self.c_obs_low)) - 10, 20),
                 s.round_up_to_nearest(max(max(c_t), max(self.c_obs_up)) + 10, 20),
             )
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(y_plot), 5))
+            ax[0].set_ylim(0, max_depth)
             ax[0].invert_yaxis()
 
             ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
@@ -865,7 +865,7 @@ class InvertDC():
         beta_plot = self._beta_profile(initial['beta'])
         z_plot = self._h_to_z_profile(initial['h'], max_depth)
         ax[1].plot(beta_plot, z_plot, c=col, label='Initial Vs profile')
-        ax[1].scatter(beta_plot, z_plot, marker='_', s=30, c='k', zorder=5, label='Layer interfaces')
+        ax[1].scatter(beta_plot[:-1], z_plot[:-1], marker='_', s=30, c='k', zorder=5, label='Layer interfaces')
 
         ax[0].legend(frameon=False)
         ax[1].legend(frameon=False)
@@ -1003,7 +1003,7 @@ class InvertDC():
                     alpha_sat, beta_initial, rho, h_initial,
                     rev_min_depth=None, rev_max_depth=None,
                     rev_min_layer=None, rev_max_layer=None,
-                    bs_max=10, bh_max=10, bs_min=2, bh_min=2, N_stall_max=0, 
+                    bs_max=10, bh_max=10, bs_min=2, bs_min_halfspace=None, bh_min=2, N_stall_max=0, 
                     decay_iterations=500, st_lt_window=(100,500),
                     N_max=1000, max_retries=100, monotonic_tol=0.1, force_monotonic=False):
         """
@@ -1055,13 +1055,12 @@ class InvertDC():
 
         iter_fail_count = 0
 
-        bs_init = bs_max
-        bh_init = bs_max
 
         bs_w = bs_max
         bh_w = bh_max
         iter_counter = 0
         N_stall = 0
+        decay_scale = 5.0  # higher = faster decay
 
         bs_run = []
         bh_run = []
@@ -1074,10 +1073,38 @@ class InvertDC():
             if force_monotonic:
                 # Retry with limit
                 for attempt in range(max_retries):
-                    beta_test = beta_opt + np.random.uniform(
-                        low=(-(bs_w / 100) * beta_opt),
-                        high=((bs_w / 100) * beta_opt)
-                    )
+                    # --- Perturb velocities ---
+                    if bs_min_halfspace is not None:
+                        # Decay for regular layers (0..n_layers-2)
+                        bs_w_layers = bs_min + (bs_max - bs_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
+
+                        # Decay for halfspace (last layer)
+
+                        #bs_w_half = bs_min_halfspace + (bs_max - bs_min_halfspace) * np.exp(-decay_scale * iter_counter / decay_iterations)
+                        decay_scale_half = decay_scale * 0.2
+                        bs_w_half = (bs_min_halfspace if bs_min_halfspace is not None else bs_min) \
+                                    + (bs_max - (bs_min_halfspace if bs_min_halfspace is not None else bs_min)) \
+                                    * np.exp(-decay_scale_half * iter_counter / (decay_iterations * 1.5))
+
+                        beta_test = beta_opt.copy()
+                        beta_test[:-1] = beta_opt[:-1] + np.random.uniform(
+                            low=-(bs_w_layers / 100) * beta_opt[:-1],
+                            high=(bs_w_layers / 100) * beta_opt[:-1]
+                        )
+                        beta_test[-1] = beta_opt[-1] + np.random.uniform(
+                            low=-(bs_w_half / 100) * beta_opt[-1],
+                            high=(bs_w_half / 100) * beta_opt[-1]
+                        )
+
+                    else:
+                        # One decay width for all layers
+                        bs_w_layers = bs_min + (bs_max - bs_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
+
+                        beta_test = beta_opt + np.random.uniform(
+                            low=-(bs_w_layers / 100) * beta_opt,
+                            high=(bs_w_layers / 100) * beta_opt
+                        )
+
 
                     valid = True
                     if rev_min > 0:
@@ -1102,10 +1129,31 @@ class InvertDC():
 
 
             elif force_monotonic==False:
-                beta_test = beta_opt + np.random.uniform(
-                        low=(-(bs_w / 100) * beta_opt),
-                        high=((bs_w / 100) * beta_opt)
-                        )
+                # Non-monotonic run
+                if bs_min_halfspace is not None:
+                    bs_w_layers = bs_min + (bs_max - bs_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
+
+                    #bs_w_half = bs_min_halfspace + (bs_max - bs_min_halfspace) * np.exp(-decay_scale * iter_counter / decay_iterations)
+                    decay_scale_half = decay_scale * 0.2
+                    bs_w_half = (bs_min_halfspace if bs_min_halfspace is not None else bs_min) \
+                                + (bs_max - (bs_min_halfspace if bs_min_halfspace is not None else bs_min)) \
+                                * np.exp(-decay_scale_half * iter_counter / (decay_iterations * 1.5))
+                    
+                    beta_test = beta_opt.copy()
+                    beta_test[:-1] = beta_opt[:-1] + np.random.uniform(
+                        low=-(bs_w_layers / 100) * beta_opt[:-1],
+                        high=(bs_w_layers / 100) * beta_opt[:-1]
+                    )
+                    beta_test[-1] = beta_opt[-1] + np.random.uniform(
+                        low=-(bs_w_half / 100) * beta_opt[-1],
+                        high=(bs_w_half / 100) * beta_opt[-1]
+                    )
+                else:
+                    bs_w_layers = bs_min + (bs_max - bs_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
+                    beta_test = beta_opt + np.random.uniform(
+                        low=-(bs_w_layers / 100) * beta_opt,
+                        high=(bs_w_layers / 100) * beta_opt
+                    )
 
             # Update alpha
             alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
@@ -1139,7 +1187,6 @@ class InvertDC():
                 h_opt = h_test
 
 
-            decay_scale = 5.0  # higher = faster decay
 
             bs_w = bs_min + (bs_max - bs_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
             bh_w = bh_min + (bh_max - bh_min) * np.exp(-decay_scale * iter_counter / decay_iterations)
@@ -1852,7 +1899,7 @@ class InvertDC():
             return fig, ax
 
 
-    def within_boundaries(self, runs='all', threshold=1.0):
+    def within_boundaries(self, runs='all', threshold=1.0, append=False, reject_reversed='False'):
         """
         Identify sampled profiles whose theoretical dispersion curves fall 
         within a specified fraction of the uncertainty bounds of the experimental data.
@@ -1898,7 +1945,11 @@ class InvertDC():
                 for j in range(len(self.c_obs_up))
             )
             match_fraction = count_within / len(self.c_obs_up)
-            if match_fraction >= threshold:
+            reversed = False
+            if reject_reversed:
+                if beta_all[i][0] > beta_all[i][-1]:
+                    reversed = True
+            if match_fraction >= threshold and reversed == False:
                 accept[i] = True
 
         # Filter accepted models
@@ -1910,22 +1961,39 @@ class InvertDC():
         e_temp = [e_all[i] for i in res]
         run_iter_selected = [run_iter_indices[i] for i in res] 
 
-        # Sort by dispersion misfit values
-        self.selected['n_layers'] = n
-        self.selected['c_t'] = self._sort_by(c_temp, e_temp, reverse=True)
-        self.selected['beta'] = self._sort_by(beta_temp, e_temp, reverse=True)
-        self.selected['alpha'] = self._sort_by(alpha_temp, e_temp, reverse=True)
-        self.selected['h'] = self._sort_by(h_temp, e_temp, reverse=True)
-        self.selected['misfit'] = sorted(e_temp, reverse=True)
-        sort_order = np.argsort(e_temp)[::-1]  
-        self.selected['run_iter'] = [run_iter_selected[i] for i in sort_order]
+        if append:
+            for key in ['c_t', 'beta', 'alpha', 'h', 'misfit', 'run_iter','z']:
+                if self.selected.get(key) is None:
+                    self.selected[key] = []
+            # Subsequent runs: extend the lists instead of appending a list
+            self.selected['n_layers'] = n  # keep current n_layers (or store per model if needed)
+            self.selected['c_t'].extend(self._sort_by(c_temp, e_temp, reverse=True))
+            self.selected['beta'].extend(self._sort_by(beta_temp, e_temp, reverse=True))
+            self.selected['alpha'].extend(self._sort_by(alpha_temp, e_temp, reverse=True))
+            self.selected['h'].extend(self._sort_by(h_temp, e_temp, reverse=True))
+            self.selected['misfit'].extend(sorted(e_temp, reverse=True))
+            sort_order = np.argsort(e_temp)[::-1]  
+            self.selected['run_iter'].extend([run_iter_selected[i] for i in sort_order])
+        else:
+            # Sort by dispersion misfit values
+            self.selected['n_layers'] = n
+            self.selected['c_t'] = self._sort_by(c_temp, e_temp, reverse=True)
+            self.selected['beta'] = self._sort_by(beta_temp, e_temp, reverse=True)
+            self.selected['alpha'] = self._sort_by(alpha_temp, e_temp, reverse=True)
+            self.selected['h'] = self._sort_by(h_temp, e_temp, reverse=True)
+            self.selected['misfit'] = sorted(e_temp, reverse=True)
+            sort_order = np.argsort(e_temp)[::-1]  
+            self.selected['run_iter'] = [run_iter_selected[i] for i in sort_order]
 
         # Compute layer depths
         n_selected = len(self.selected['h'])
         z_temp = [None] * n_selected
         for j in range(n_selected):
             z_temp[j] = self._h_to_z(self.selected['h'][j], n)
-        self.selected['z'] = z_temp
+        if append:
+            self.selected['z'].extend(z_temp)
+        else:
+            self.selected['z'] = z_temp
 
     def within_boundaries_AP(self, runs='all', threshold=1.0, misfit_percentile=100):
         """
@@ -2281,7 +2349,8 @@ class InvertDC():
         All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
         """
         # Get shear wave velocity profiles whose theoretical dispersion curves fall within bounds
-        self.within_boundaries(runs=runs, threshold=threshold)
+        if self.settings['only_save_accepted'] == False:
+            self.within_boundaries(runs=runs, threshold=threshold)
         no_within = len(self.selected['c_t'])
 
         # Use λ/3 as y-axis if pseudo_depth is True
@@ -2547,9 +2616,9 @@ class InvertDC():
         z_median = [np.median(z_layers[i]) for i in range(n)]
         
         # Return to dictionary
-        median_profile = {}
-        median_profile['beta'] = beta_median
-        median_profile['z'] = z_median
+        median_profile_dict = {}
+        median_profile_dict['beta'] = beta_median
+        median_profile_dict['z'] = z_median
         
         # Compute q-th percentiles
         if perc:
@@ -2557,12 +2626,14 @@ class InvertDC():
             z_percentile = [np.percentile(z_layers[i], q) for i in range(n)]
             
             # Return to dictionary
-            median_profile['beta_low'] = [beta_percentile[i][0] for i in range(n+1)]
-            median_profile['beta_up'] = [beta_percentile[i][1] for i in range(n+1)]
-            median_profile['z_low'] = [z_percentile[i][0] for i in range(n)]
-            median_profile['z_up'] = [z_percentile[i][1] for i in range(n)]    
+            median_profile_dict['beta_low'] = [beta_percentile[i][0] for i in range(n+1)]
+            median_profile_dict['beta_up'] = [beta_percentile[i][1] for i in range(n+1)]
+            median_profile_dict['z_low'] = [z_percentile[i][0] for i in range(n)]
+            median_profile_dict['z_up'] = [z_percentile[i][1] for i in range(n)]
+
+        self.median_profile_dict = median_profile_dict    
             
-        return median_profile
+        return median_profile_dict
 
     
     def plot_profile(self, profile, max_depth, c_test, initial, col='crimson', up_low=False, DC_yaxis='linear', 
