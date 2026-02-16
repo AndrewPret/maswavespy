@@ -47,10 +47,10 @@ import pickle
 from tqdm import tqdm
 import random
 
-from maswavespy import supplemental as s
+import supplemental as s
 
 # Computation of theoretical dispersion curves (cython optimization)
-from maswavespy import cy_theoretical_dc as t_dc
+import cy_theoretical_dc as t_dc
 
 
 class InvertDC():

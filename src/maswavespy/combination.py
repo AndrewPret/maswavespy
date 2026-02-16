@@ -39,7 +39,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter
 
-from maswavespy import supplemental as s
+import supplemental as s
 
 
 class CombineDCs():
