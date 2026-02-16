@@ -23,6 +23,8 @@ Combine experimental (observed) dispersion curves and assess uncertainties
 associated with the dispersion analysis process. The data processing is 
 conducted as described in Olafsdottir et al. (2018b). 
 
+Adapted for Zetica by AP, February 2026
+
 References
 ----------
 Dispersion curve combination
