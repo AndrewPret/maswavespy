@@ -50,7 +50,7 @@ import random
 from maswavespy import supplemental as s
 
 # Computation of theoretical dispersion curves (cython optimization)
-import cy_theoretical_dc as t_dc
+from maswavespy import cy_theoretical_dc as t_dc
 
 
 class InvertDC():
@@ -198,7 +198,6 @@ class InvertDC():
     def __init__(self, site, profile, c_obs, c_obs_low, c_obs_up, wavelength, uncertainty_weighting,
                     depth_weights, depth_weight_offset_const, misfit_mode, plot_weights_file, 
                     regularisation, regularisation_weights, regularisation_ranges, 
-                    damping, damping_weight, damp_ref_Vs, damp_ref_h,
                     settings, metadata=None):    
         
         """
@@ -248,20 +247,15 @@ class InvertDC():
         self.plot_weights_file = plot_weights_file
         self.model_history = None
 
-        # misfit regularisation and damping
+        # misfit regularisation
         self.regularisation = regularisation 
         self.regularisation_weights = regularisation_weights   
         self.regularisation_ranges = regularisation_ranges
-        self.damping = damping
-        self.damping_weight = damping_weight
-        self.damp_ref_Vs=damp_ref_Vs 
-        self.damp_ref_h=damp_ref_h
 
         # initialise misfit penalties
         self.max_model_smooth_pen = 1
         self.max_bounds_pen = 1
         self.max_diversity_pen = 1
-        self.max_damping_pen = 1
 
 
         # All sampled profiles.
@@ -338,8 +332,7 @@ class InvertDC():
                 depth_weights=None, offset_const=1, 
                 mode='average', plot_weights_file=False,
                 regularisation=False, regularisation_weights=None,
-                regularisation_ranges=None, damping=False,
-                damping_weight=0.0, damp_ref_Vs=None, damp_ref_h=None):
+                regularisation_ranges=None):
         """
         Evaluate the misfit between observed and theoretical MASW dispersion curves, with optional
         uncertainty weighting, depth weighting, and multiple normalized penalty terms.
@@ -392,15 +385,6 @@ class InvertDC():
             Depth ranges (in meters) over which to apply regularization, e.g. [(0, 10), (20, 30)].
             If None, applies to full depth range.
 
-        damping : bool, default=False
-            If True, apply damping penalty to keep model close to a reference model.
-        damping_weight : float, default=0.0
-            Weight for damping penalty, in [0, 1].
-        damp_ref_Vs : numpy.ndarray (1D), optional
-            Reference Vs profile (same length as `model_Vs`). Required if `damping=True`.
-        damp_ref_h : numpy.ndarray (1D), optional
-            Reference layer thicknesses (same length as `model_h`).
-
         self.settings['uncert_bounds_misfit_weight'] : float in [0, 1]
             Weight for bounds violation penalty.
         self.settings['rep_explore_pen_weight'] : float in [0, 1]
@@ -415,14 +399,11 @@ class InvertDC():
             2. Model Smoothness ('model'):
                 Second-order finite difference of `model_Vs`.
                 Normalized by `self.max_model_smoothness`.
-            3. Damping to Reference:
-                Squared deviation of `model_Vs` from `damp_ref_Vs`.
-                Normalized by `self.max_damping`.
-            4. Bounds Violation:
+            3. Bounds Violation:
                 Squared amount by which `c_t` exceeds upper bound (`self.c_obs_up`)
                 or falls below lower bound (`self.c_obs_low`).
                 Normalized by `self.max_bounds_violation`.
-            5. Diversity Penalty:
+            4. Diversity Penalty:
                 Distance in model space from previously visited models.
                 Normalized by `self.max_diversity`.
 
@@ -505,13 +486,6 @@ class InvertDC():
             reg_penalty_norm = reg_penalty / self.max_model_smooth_pen
             misfit += reg_penalty_norm
 
-        # ---- Damping penalty ----
-        if damping and damping_weight > 0 and damp_ref_Vs is not None:
-            diff_from_ref = model_Vs - damp_ref_Vs
-            damping_penalty = np.sum(diff_from_ref ** 2)
-            self.max_damping_pen = max(self.max_damping_pen, damping_penalty)
-            damping_penalty_norm = damping_penalty / self.max_damping_pen
-            misfit += damping_weight * damping_penalty_norm
 
         # ---- Bounds violation penalty ----
         bounds_w = self.settings.get("uncert_bounds_misfit_weight", 0)
@@ -823,8 +797,7 @@ class InvertDC():
                                 initial['beta'], initial['rho'], initial['h'], c_test['delta_c'])
         e = self.misfit_AP(c_t, self.wavelength, initial['beta'], initial['h'], self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
                             mode=self.misfit_mode, plot_weights_file=self.plot_weights_file, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                            regularisation_ranges=self.regularisation_ranges, damping=self.damping,
-                            damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
+                            regularisation_ranges=self.regularisation_ranges)
 
         if ax is None:
             fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)), constrained_layout=True)
@@ -1028,8 +1001,7 @@ class InvertDC():
         c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
         e_opt = self.misfit_AP(c_t, self.wavelength,  beta_initial, h_initial, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
                                 mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                regularisation_ranges=self.regularisation_ranges, damping=self.damping,
-                                damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
+                                regularisation_ranges=self.regularisation_ranges)
         e_initial = e_opt
         beta_opt = beta_initial
         h_opt = h_initial
@@ -1174,8 +1146,7 @@ class InvertDC():
             c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
             e_test = self.misfit_AP(c_t, self.wavelength, beta_test, h_test, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
                                     mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                    regularisation_ranges=self.regularisation_ranges, damping=self.damping,
-                                    damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
+                                    regularisation_ranges=self.regularisation_ranges)
 
 
             beta_run[w] = beta_test
@@ -1377,7 +1348,6 @@ class InvertDC():
             self.max_model_smooth_pen = 1
             self.max_bounds_pen = 1
             self.max_diversity_pen = 1
-            self.max_damping_pen = 1
 
             temp = self.mc_initiation_AP(c_vec, c_test['step'], c_test['delta_c'], 
                                 initial['n'], initial['n_unsat'], initial['alpha'], 
@@ -3499,8 +3469,7 @@ class InvertDC():
         c_t_profile = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, n, alpha, beta, initial['rho'], h, c_test['delta_c'])
         self.e_median_profile = self.misfit_AP(c_t_profile, self.wavelength, beta, h, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
                                 mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                regularisation_ranges=self.regularisation_ranges, damping=self.damping,
-                                damping_weight=self.damping_weight, damp_ref_Vs=self.damp_ref_Vs, damp_ref_h=self.damp_ref_h)
+                                regularisation_ranges=self.regularisation_ranges)
         
         # resample mean observed curve at evenly spaced pseudodepth intervals
         
