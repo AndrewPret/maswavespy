@@ -194,11 +194,8 @@ class InvertDC():
         Get layer thicknesses from locations of layer interfaces. 
 
     """    
-    
-    def __init__(self, site, profile, c_obs, c_obs_low, c_obs_up, wavelength, uncertainty_weighting,
-                    depth_weights, depth_weight_offset_const, misfit_mode, plot_weights_file, 
-                    regularisation, regularisation_weights, regularisation_ranges, 
-                    settings, metadata=None):    
+
+    def __init__(self, site, profile, c_obs, c_obs_low, c_obs_up, wavelength, settings, metadata=None):    
         
         """
         Initialize an inversion analysis object.
@@ -239,20 +236,7 @@ class InvertDC():
         self.c_obs_abs_unc = (c_obs_up - c_obs_low)/2
         self.wavelength = wavelength
 
-        # misfit weighting
-        self.uncertainty_weighting = uncertainty_weighting
-        self.depth_weights = depth_weights
-        self.depth_weight_offset_const = depth_weight_offset_const
-        self.misfit_mode = misfit_mode
-        self.plot_weights_file = plot_weights_file
-        self.model_history = None
-
-        # misfit regularisation
-        self.regularisation = regularisation 
-        self.regularisation_weights = regularisation_weights   
-        self.regularisation_ranges = regularisation_ranges
-
-        # initialise misfit penalties
+        # initialise misfit penalties here, ensures they are reset when a new inversion object is made for a new line
         self.max_model_smooth_pen = 1
         self.max_bounds_pen = 1
         self.max_diversity_pen = 1
@@ -308,7 +292,7 @@ class InvertDC():
         return InvertDC(site, profile, d['c_mean'], d['c_low'], d['c_up'], d['wavelength'], metadata=metadata)
 
     
-    def misfit(self, c_t):
+    def misfit_RMS(self, c_t):
     
         """
         Evaluate dispersion misfit.
@@ -327,12 +311,8 @@ class InvertDC():
         return (1 / len(c_t)) * sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
     
 
-    def misfit_AP(self, c_t, wavelengths, model_Vs, model_h, 
-                uncertainty_weighting=False, uncertainty=None, 
-                depth_weights=None, offset_const=1, 
-                mode='average', plot_weights_file=False,
-                regularisation=False, regularisation_weights=None,
-                regularisation_ranges=None):
+    def misfit(self, c_t, model_Vs, model_h): 
+
         """
         Evaluate the misfit between observed and theoretical MASW dispersion curves, with optional
         uncertainty weighting, depth weighting, and multiple normalized penalty terms.
@@ -413,6 +393,18 @@ class InvertDC():
             Total misfit:
                 misfit_total = base_misfit + Σ (penalty_weight * normalized_penalty)
         """
+        # default settings
+        uncertainty_weighting = self.settings.get('uncertainty_weighting', False)
+        uncertainty = self.settings.get('uncertainty', None)
+        depth_weights = self.settings.get('depth_weights', None)
+        offset_const = self.settings.get('depth_weight_offset_const', 1)
+        mode = self.settings.get('misfit_mode', 'average')
+        regularisation = self.settings.get('regularisation', False)
+        regularisation_weights = self.settings.get('regularisation_weights', None)
+        regularisation_ranges = self.settings.get('regularisation_ranges', None)
+
+        ### TODO RMS misfit can reported without penalties
+        base_rms_misfit = (1 / len(c_t)) * sum(np.sqrt((self.c_obs - c_t) ** 2) / self.c_obs) * 100
 
         # =======================================================
         # BASE % ERROR (in fractional form: 0–1 internally)
@@ -510,37 +502,6 @@ class InvertDC():
         # =======================================================
         return misfit * 100
 
-        # # ---- Plot weights and regularised depths if requested ----
-        # if plot_weights_file and weights_plot==True:
-        #     wavelengths_1third = wavelengths / 3
-        #     plt.figure(figsize=(8, 5))
-        #     if uncertainty_weights is not None and depth_weights is not None:
-        #         plt.plot(wavelengths_1third, uncertainty_weights, label='Uncertainty weights', marker='x')
-        #         plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
-        #         plt.plot(wavelengths_1third, total_weights, label='Total Weights', marker='x')
-        #     elif uncertainty_weights is not None:
-        #         plt.plot(wavelengths_1third, uncertainty_weights, label='Base Weights (1/uncertainty)', marker='x')
-        #     elif depth_weights is not None:
-        #         plt.plot(wavelengths_1third, depth_weights, label='Depth Weights', marker='x')
-
-        #     # Highlight regularisation depth range
-        #     if regularisation == 'dc' and regularisation_range is not None:
-        #         wavelengths_1third = wavelengths / 3
-        #         depth_min, depth_max = regularisation_range
-        #         plt.axvspan(depth_min, depth_max, color='lightgray', alpha=0.4,
-        #                     label=f'Regularisation applied\n({depth_min}-{depth_max} m)')
-            
-        #     plt.xlim(np.min(wavelengths_1third), np.max(wavelengths_1third))
-        #     plt.xlabel("1/3rd wavelength (m)")
-        #     plt.ylabel("Normalized Weight")
-        #     plt.title("Misfit weighting")
-        #     plt.legend()
-        #     plt.grid(True)
-        #     plt.tight_layout()
-        #     plt.savefig(plot_weights_file)
-        #     plt.close()
-
-        # return misfit
 
     @staticmethod
     def diversity_penalty(model_Vs, model_h, model_history, vs_weight=1.0, h_weight=0.1):
@@ -590,134 +551,8 @@ class InvertDC():
             raise ValueError(message)
         else:
             return arr
-          
-    
-    def view_initial(self, initial, max_depth, c_test, col='crimson', DC_yaxis='linear', 
-                     fig=None, ax=None, figwidth=16, figheight=12, return_ct=False):
-        
-        """
-        Plot the initially specified shear wave velocity profile (initial). 
-        The associated theoretical dispersion curve is computed and compared 
-        to the experimental data.
-        
-        Parameters
-        ----------        
-        initial : dict
-            Dictionary containing information on model parameterization and 
-            parametric values for the shear wave velocity profile. 
-            For further information on initial, please refer to the 
-            documentation of mc_inversion. The following key: value pairs are required.
-        
-            initial['n'] : int
-                Number of finite thickness layers.
-            initial['alpha'] : numpy.ndarray 
-                Initial values for the compressional wave velocity of each layer [m/s] 
-                (array of size (n+1,)).
-            initial['beta'] : numpy.ndarray 
-                Initial values for the shear wave velocity of each layer [m/s] 
-                (array of size (n+1,)).
-            initial['rho'] : numpy.ndarray 
-                Mass density of each layer [kg/m^3] (array of size (n+1,)).
-            initial['h'] : numpy.ndarray 
-                Initial thickness of each layer [m] (array of size (n,)).
-            
-        max_depth : int or float
-            Maximum depth of shear wave velocity profile (for plotting) [m].
-        c_test : dict
-            Dictionary containing information on testing Rayleigh wave phase
-            velocity values. For further information on c_test, please refer 
-            to the documentation of mc_inversion.  
-        col : a Matplotlib color or sequence of color, optional
-            Linecolor.
-            Default is col='crimson'.    
-        DC_yaxis : {'linear', 'log'}, optional
-            Scale of dispersion curve wavelength axis. 
-            - DC_yaxis='linear': Linear scale for wavelengths.
-            - DC_yaxis='log': Logarithmic scale for wavelengths.
-            Default is DC_yaxis='linear'.
-        fig : figure, optional
-            Figure object.
-            Default is fig=None, a new figure object is created.
-        ax : axes object, optional 
-            The axes of the subplots. 
-            Default is ax=None, a new set of axes is created.
-        figwidth : int or float, optional
-            Width of figure in centimeters [cm].
-            Default is figwidth=16. 
-        figheight : int or float, optional
-            Height of figure in centimeters [cm].
-            Default is figheight=12.  
-        return_ct : boolean, optional
-            If return_ct is True, the theoretical dispersion curve associated
-            with the given shear wave velocity profile is returned. 
-            Default is return_ct=False.
-        
-        Returns
-        -------
-        c_t : numpy.ndarray, optional
-            Theoretical dispersion curve, Rayleigh wave phase velocity array [m/s].
-            The associated wavelengths are stored in self.wavelength.
-        
-        """
-        # Testing range for Rayleigh wave phase velocity [m/s]
-        c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64)
-        
-        # Check input parameters
-        initial['alpha'] = self._check_length(initial['n']+1, initial['alpha'], 'alpha_initial')
-        initial['beta'] = self._check_length(initial['n']+1, initial['beta'], 'beta_initial')
-        initial['rho'] = self._check_length(initial['n']+1, initial['rho'], 'rho')
-        initial['h'] = self._check_length(initial['n'], initial['h'], 'h_initial')
-        
-        # Compute the theoretical dispersion curve and evaluate the dispersion  
-        # misfit value for the initial set of model parameters
-        c_t = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, initial['n'], initial['alpha'], initial['beta'], initial['rho'], initial['h'], c_test['delta_c'])
-        e = self.misfit(c_t)
-        
 
-        if ax is None:
-            fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)), constrained_layout=True)
-            
-            # Plot experimental dispersion curve
-            ax[0].plot(self.c_obs, self.wavelength,'-', color='k', label='Mean')
-            ax[0].plot(self.c_obs_low, self.wavelength, '--', color='k', label='Upper/lower')
-            ax[0].plot(self.c_obs_up, self.wavelength, '--', color='k')
-
-            ax[0].grid(color='gainsboro', linestyle=':')
-            ax[1].grid(color='gainsboro', linestyle=':')
-            
-            # Axes labels and limits 
-            ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
-            ax[0].set_ylabel('Wavelength [m]', fontweight='bold')
-            ax[0].set_xlim(s.round_down_to_nearest(min(min(c_t), min(self.c_obs_low))-10, 20), s.round_up_to_nearest(max(max(c_t), max(self.c_obs_up))+10, 20))
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(self.wavelength), 5))            
-            ax[0].invert_yaxis() 
-
-            ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
-            ax[1].set_ylabel('Depth [m]', fontweight='bold')
-            ax[1].set_xlim(s.round_down_to_nearest(min(initial['beta'])-10, 20), s.round_up_to_nearest(max(initial['beta'])+10, 20))
-            ax[1].set_ylim(0, max_depth)
-            ax[1].invert_yaxis() 
-            
-        # Plot theoretical dispersion curve
-        ax[0].plot(c_t, self.wavelength, c=col, label='Theoretical')
-        
-        # Plot shear wave velocity profile
-        beta_plot = self._beta_profile(initial['beta'])
-        z_plot = self._h_to_z_profile(initial['h'], max_depth)
-        ax[1].plot(beta_plot, z_plot, c=col, label='Initial Vs profile')
-
-        # Create legends
-        ax[0].legend(frameon=False)
-        ax[1].legend(frameon=False)
-                      
-        # Print misfit value
-        print(f'Misfit: {round(e,3)} %')
-        
-        if return_ct:
-            return c_t
-    
-    def view_initial_AP(self, initial, max_depth, c_test, col='crimson', DC_yaxis='linear',
-                    fig=None, ax=None, figwidth=16, figheight=12, return_ct=False, pseudo_depth=False):
+    def view_initial(self, initial, col='crimson', fig=None, ax=None, return_ct=False):
                 
         """
         Plot the initially specified shear wave velocity profile (initial). 
@@ -754,11 +589,6 @@ class InvertDC():
         col : a Matplotlib color or sequence of color, optional
             Linecolor.
             Default is col='crimson'.    
-        DC_yaxis : {'linear', 'log'}, optional
-            Scale of dispersion curve wavelength axis. 
-            - DC_yaxis='linear': Linear scale for wavelengths.
-            - DC_yaxis='log': Logarithmic scale for wavelengths.
-            Default is DC_yaxis='linear'.
         fig : figure, optional
             Figure object.
             Default is fig=None, a new figure object is created.
@@ -783,6 +613,13 @@ class InvertDC():
             The associated wavelengths are stored in self.wavelength.
         
         """
+
+        max_depth = self.settings['max_depth']
+        c_test = self.settings['c_test']
+        figwidth = self.settings['figsize'][0]
+        figheight = self.settings['figsize'][1]
+        pseudo_depth = self.settings['pseudo_depth']
+
         # Testing range for Rayleigh wave phase velocity [m/s]
         c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64)
         
@@ -795,9 +632,7 @@ class InvertDC():
         # Compute theoretical dispersion curve
         c_t = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, initial['n'], initial['alpha'],
                                 initial['beta'], initial['rho'], initial['h'], c_test['delta_c'])
-        e = self.misfit_AP(c_t, self.wavelength, initial['beta'], initial['h'], self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                            mode=self.misfit_mode, plot_weights_file=self.plot_weights_file, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                            regularisation_ranges=self.regularisation_ranges)
+        e = self.misfit(c_t, initial['beta'], initial['h'])
 
         if ax is None:
             fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)), constrained_layout=True)
@@ -854,138 +689,29 @@ class InvertDC():
         return fig, ax
 
 
-    def mc_initiation(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat, 
-                alpha_sat, beta_initial, rho, h_initial, reversals, bs, bh, N_max):
-
-        """
-        Monte Carlo based inversion for shear wave velocity and layer thicknesses, 
-        single initiation of the sampling scheme.
-
-        Parameters
-        ----------
-        c_vec : numpy.ndarray
-            Rayleigh wave phase velocity, testing values [m/s].
-        c_step : float
-            Testing Rayleigh wave phase velocity increment [m/s].
-        delta_c : float
-            Zero search initiation parameter [m/s].
-                At wave number k_{i} the zero search is initiated at a phase velocity 
-                value of c_{i-1} - delta_c, where c_{i-1} is the theoretical  
-                Rayleigh wave phase velocity value at wave number k_{i-1}.
-        n : int
-            Number of finite thickness layers.
-        n_unsat : int
-            Number of unsaturated (soft) soil layers. 
-            n_unsat = 0 for a fully saturated profile (gwt at surface).
-            n_unsat = 1 for an unsaturated surficial layer.
-            ...
-            n_unsat = n+1 for a fully unsaturated profile.
-        alpha_initial : numpy.ndarray 
-            Initial values for the compressional wave velocity of each layer [m/s] 
-            (array of size (n+1,)).
-        nu_unsat : float
-            Poisson's ratio for unsaturated soil layers.
-        alpha_sat : float
-            Compressional wave velocity for saturated soil layers [m/s].
-        beta_initial : numpy.ndarray 
-            Initial values for the shear wave velocity of each layer [m/s] 
-            (array of size (n+1,)).
-        rho : numpy.ndarray 
-            Mass density of each layer [kg/m^3] (array of size (n+1,)).
-        h_initial : numpy.ndarray 
-            Initial thickness of each layer [m] (array of size (n,)).
-        reversals : int
-            Number of layer interfaces (counted from the surface) where 
-            velocity reversals are permitted.
-            reversals = 0 for a normally dispersive profile.
-            reversals = 1 for allowing velocity reversals at the first layer interface.
-            ...
-        bs : int or float
-            Shear wave velocity search-control parameter.
-        bh : int or float
-            Layer thickness search-control parameter.
-        N_max : int
-            Number of iterations.
-
-        Returns
-        -------
-        beta_run : list of numpy.ndarrays
-            List of sampled shear wave velocity arrays [m/s].
-        alpha_run : list of numpy.ndarrays
-            List of compressional wave velocity arrays [m/s].
-        h_run : list of numpy.ndarrays
-            List of sampled layer thickness arrays [m].
-        c_t_run : list of numpy.ndarrays
-            List of theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
-        e_run : list
-            List of dispersion misfit values.
-          
-        beta_run[i], alpha_run[i], h_run[i], c_t_run[i] and e_run[i] result 
-        from the i-th iteration. 
-
-        """        
-        # Initiation    
-        beta_run = [None for i in range(N_max)]
-        alpha_run = [None for i in range(N_max)]
-        h_run = [None for i in range(N_max)]
-        c_t_run = [None for i in range(N_max)]
-        e_run = [None for i in range(N_max)]
-                
-        # Compute the theoretical dispersion curve and evaluate the dispersion  
-        # misfit value for the initial set of model parameters
-        c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
-        e_opt = self.misfit(c_t)
-        beta_opt = beta_initial
-        h_opt = h_initial
-        
-        # Iteration
-        for w in range(N_max):
-            
-            # Testing shear wave velocity array (sample the shear wave velocity for each layer)
-            beta_test = beta_opt + np.random.uniform(low=(-(bs / 100) * beta_opt), high=((bs / 100) * beta_opt))
-            while (beta_test[reversals:] != np.sort(beta_test[reversals:])).any():
-                beta_test = beta_opt + np.random.uniform(low=(-(bs / 100) * beta_opt), high=((bs / 100) * beta_opt))
-                
-            # Testing compressional wave velocity array (reevaluate the compressional wave 
-            # velocity for each layer based on its testing shear wave velocity value)
-            alpha_unsat = np.sqrt((2 * (1 - nu_unsat)) / (1 - 2 * nu_unsat)) * beta_test
-            alpha_test = alpha_sat * np.ones(len(beta_test), dtype=np.double)
-            if (n_unsat != 0):
-                alpha_test[0:n_unsat] = alpha_unsat[0:n_unsat]
-
-            # Testing layer thickness array (sample the thickness for each layer)
-            h_test = h_opt + np.random.uniform(low=(-(bh / 100) * h_opt), high=((bh / 100) * h_opt))
-            
-            # Compute the theoretical dispersion curve and evalute the dispersion misfit
-            c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
-            e_test = self.misfit(c_t)
-            
-            beta_run[w] = beta_test
-            h_run[w] = h_test
-            alpha_run[w] = alpha_test
-            c_t_run[w] = c_t
-            e_run[w] = e_test
-            
-            if e_test <= e_opt:
-                e_opt = e_test
-                beta_opt = beta_test
-                h_opt = h_test
-        
-        return beta_run, alpha_run, h_run, c_t_run, e_run
-    
-
-    
-    def mc_initiation_AP(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat,
-                    alpha_sat, beta_initial, rho, h_initial,
-                    rev_min_depth=None, rev_max_depth=None,
-                    rev_min_layer=None, rev_max_layer=None,
-                    bs_max=10, bh_max=10, bs_min=2, bs_min_halfspace=None, bh_min=2, N_stall_max=0, 
-                    decay_iterations=500, st_lt_window=(100,500),
-                    N_max=1000, max_retries=100, monotonic_tol=0.1, force_monotonic=False):
+    def mc_initiation(self, c_vec, c_step, delta_c, n, n_unsat, alpha_initial, nu_unsat,
+                    alpha_sat, beta_initial, rho, h_initial):
         """
         Monte Carlo inversion for shear wave velocity and layer thicknesses,
         with flexible velocity reversal constraints and retry safeguards.
         """
+        # Get settings with defaults
+        rev_min_depth = self.settings.get('rev_min_depth', None)
+        rev_max_depth = self.settings.get('rev_max_depth', None)
+        rev_min_layer = self.settings.get('rev_min_layer', None)
+        rev_max_layer = self.settings.get('rev_max_layer', None)
+        bs_max = self.settings.get('bs', 10)
+        bh_max = self.settings.get('bh', 10)
+        bs_min = self.settings.get('bs_min', 2)
+        bh_min = self.settings.get('bh_min', 2)
+        bs_min_halfspace = self.settings.get('bs_min_halfspace', None)
+        N_stall_max = self.settings.get('N_stall_max', 0)
+        decay_iterations = self.settings.get('b_decay_iterations', 500)
+        st_lt_window = self.settings.get('st_lt_window', (100, 500))
+        N_max = self.settings.get('N_max', 1000)
+        max_retries = self.settings.get('max_retries', 100)
+        monotonic_tol = self.settings.get('monotonic_tol', 0.1)
+        force_monotonic = self.settings.get('force_monotonic', False)
 
         def is_monotonic(arr, increasing=True, tol=1e-3):
             diffs = np.diff(arr)
@@ -999,9 +725,7 @@ class InvertDC():
 
         # Initial model
         c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_initial, beta_initial, rho, h_initial, delta_c)
-        e_opt = self.misfit_AP(c_t, self.wavelength,  beta_initial, h_initial, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                                mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                regularisation_ranges=self.regularisation_ranges)
+        e_opt = self.misfit(c_t, beta_initial, h_initial)
         e_initial = e_opt
         beta_opt = beta_initial
         h_opt = h_initial
@@ -1144,9 +868,7 @@ class InvertDC():
 
             # Evaluate model
             c_t = t_dc.compute_fdma(c_vec, c_step, self.wavelength, n, alpha_test, beta_test, rho, h_test, delta_c)
-            e_test = self.misfit_AP(c_t, self.wavelength, beta_test, h_test, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                                    mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                    regularisation_ranges=self.regularisation_ranges)
+            e_test = self.misfit(c_t, beta_test, h_test)
 
 
             beta_run[w] = beta_test
@@ -1192,7 +914,7 @@ class InvertDC():
 
         return beta_run, alpha_run, h_run, c_t_run, e_run, np.array(bs_run), np.array(bh_run)
 
-    def mc_inversion_MultInitModels_AP(self, c_test, initial_list, settings):
+    def mc_inversion_MultInitModels(self, initial_list, settings):
 
         """
         Monte Carlo based inversion for shear wave velocity and layer thicknesses. 
@@ -1296,7 +1018,10 @@ class InvertDC():
                 resulting from the i-th run of the algorithm.
                 
         """       
+
+
         # Testing range for Rayleigh wave phase velocity [m/s]
+        c_test = self.settings['c_test']
         c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64)
         
         # Initiate lists for temporarily storing sampled shear wave velocity 
@@ -1349,18 +1074,10 @@ class InvertDC():
             self.max_bounds_pen = 1
             self.max_diversity_pen = 1
 
-            temp = self.mc_initiation_AP(c_vec, c_test['step'], c_test['delta_c'], 
+            temp = self.mc_initiation(c_vec, c_test['step'], c_test['delta_c'], 
                                 initial['n'], initial['n_unsat'], initial['alpha'], 
                                 initial['nu_unsat'], initial['alpha_sat'], initial['beta'],
-                                initial['rho'], initial['h'],
-                                rev_min_depth=initial['rev_min_depth'], rev_max_depth=initial['rev_max_depth'],
-                                rev_min_layer=initial['rev_min_layer'], rev_max_layer=initial['rev_max_layer'],
-                                bs_max=settings['bs'], bh_max=settings['bh'], bs_min=settings['bs_min'], 
-                                bs_min_halfspace=settings['bs_min_halfspace'], 
-                                bh_min=settings['bh_min'], N_stall_max=settings['N_stall_max'], 
-                                decay_iterations=settings["b_decay_iterations"], st_lt_window=settings['st_lt_window'],
-                                N_max=settings['N_max'], max_retries=settings['max_retries'], 
-                                monotonic_tol=settings['monotonic_tol'], force_monotonic=settings['force_monotonic'])
+                                initial['rho'], initial['h'])
 
 
             beta_all[i], alpha_all[i], h_all[i], c_t_all[i], e_all[i], bs_all[i], bh_all[i] = temp
@@ -1842,139 +1559,8 @@ class InvertDC():
                 
         return beta_plot
 
-
-    def plot_sampled(self, max_depth, runs='all', figwidth=16, figheight=12, col_map='viridis', 
-                      colorbar=True, DC_yaxis='linear', return_axes=False, show_exp_dc=True):
-        
-        """
-        Plot sampled shear wave velocity profiles (as interval velocity profiles) 
-        and the corresponding theoretical dispersion curves. The shear wave 
-        velocity profiles/dispersion curves are sorted based on dispersion misfit 
-        values and displayed using a color scale. 
-        
-        Parameters
-        ----------
-        max_depth : int or float
-            Maximum depth of shear wave velocity profiles (for plotting) [m].
-        runs : str ('all'), int, list or numpy.ndarray, optional
-            Sampling scheme initiations (runs) that are to be displayed. 
-            Default is to combine and show all runs, i.e., runs='all'.
-            Alternatively, runs can be defined as an integer or a list/array
-            of integers, e.g.,
-            - runs=0: Show run no. 1.
-            - runs=1: Show run no. 2.
-            - runs=[0,1]: Show runs no. 1 and 2 (combined).
-        figwidth : int or float, optional
-            Width of figure in centimeters [cm].
-            Default is figwidth=16. 
-        figheight : int or float, optional
-            Height of figure in centimeters [cm].
-            Default is figheight=12.
-        col_map : str or Colormap, optional
-            Registered colormap name or a Colormap instance.
-            Default is col_map='viridis'.
-        colorbar : boolean, optional
-            Show colorbar (yes=True, no=False).
-            Default is colorbar=True.
-        DC_yaxis : {'linear', 'log'}, optional 
-            Scale of dispersion curve wavelength axis. 
-            - DC_yaxis='linear': Linear scale for wavelengths.
-            - DC_yaxis='log': Logarithmic scale for wavelengths.
-            Default is DC_yaxis='linear'.
-        return_axes : boolean, optional
-            If return_axes is True, the initialized figure object and set of 
-            axes are returned. Default is return_axes=False.
-        show_exp_dc : boolean, optional
-            Show experimental dispersion curve (yes=True, no=False).
-            Default is show_exp_dc=True.
-            
-        Returns
-        -------
-        fig : figure, optional
-            Figure object.
-        ax : axes object, optional 
-            The axes of the subplots. 
-        
-        Raises
-        ------
-        AttributeError
-            If no sampled profiles exist.         
-
-        """
-        if not bool(self.profiles.get('n_layers')):
-            message = 'No sampled profiles exist. The dictionary ´profiles´ contains None values.' 
-            raise AttributeError(message)
-            
-        runs = self._check_runs(runs)
-        
-        # Sort data by dispersion misfit values
-        e_all = self._combine_runs([self.profiles['misfit'][i] for i in runs])
-        c_sort = self._sort_by(self._combine_runs([self.profiles['c_t'][i] for i in runs]), e_all, reverse=True)
-        beta_sort = self._sort_by(self._combine_runs([self.profiles['beta'][i] for i in runs]), e_all, reverse=True)
-        h_sort = self._sort_by(self._combine_runs([self.profiles['h'][i] for i in runs]), e_all, reverse=True)
-        e_sort = sorted(e_all, reverse=True)
-        no_profiles = len(e_sort)      
-
-        # Figure settings
-        fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth),s.cm_to_in(figheight)), constrained_layout=True)
-        
-        # Plot theoretical dispersion curves
-        lc = s.plot_lines(c_sort, [self.wavelength for i in range(no_profiles)], list(range(no_profiles)), ax=ax[0], cmap=col_map, lw=0.4)  
-        if show_exp_dc:
-            ax[0].plot(self.c_obs, self.wavelength, '-', color='k')
-            ax[0].plot(self.c_obs_low, self.wavelength, '--', color='k')
-            ax[0].plot(self.c_obs_up, self.wavelength, '--', color='k')
-        
-        # Axes labels and limits 
-        ax[0].set_xlim(s.round_down_to_nearest(np.min(c_sort)-10, 20), s.round_up_to_nearest(np.max(c_sort)+10, 20))
-        ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
-        ax[0].set_ylabel('Wavelength [m]', fontweight='bold')
-        
-        # Figure appearance
-        if type(DC_yaxis) is str and DC_yaxis.lower() == 'linear':
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(self.wavelength), 5))
-            ax[0].set_yscale('linear')
-        elif type(DC_yaxis) is str and DC_yaxis.lower() == 'log':
-            ax[0].set_ylim(max(s.round_down_to_nearest(min(self.wavelength), 1), 0.1) , s.round_up_to_nearest(max(self.wavelength), 5))
-            ax[0].set_yscale('log')
-        else:
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(self.wavelength), 5))
-            ax[0].set_yscale('linear')
-            warnings.warn('Scale of wavelength axis (DC_yaxis) not recognized. Dispersion curves displayed on a linear wavelength scale (default setting).')
-        ax[0].invert_yaxis() 
-        ax[0].grid(color='gainsboro', linestyle=':')
-        
-        # Plot shear wave velocity profiles
-        beta_plot = self._beta_profile(beta_sort)
-        z_plot = self._h_to_z_profile(h_sort, max_depth)
-        s.plot_lines(beta_plot, z_plot, list(range(no_profiles)), ax=ax[1], cmap=col_map, lw=0.4)  
-        
-        # Axes labels and limits 
-        ax[1].set_xlim(s.round_down_to_nearest(np.min(beta_sort)-10, 20), s.round_up_to_nearest(np.max(beta_sort)+10, 20))
-        ax[1].set_ylim(0, max_depth)
-        ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
-        ax[1].set_ylabel('Depth [m]', fontweight='bold')
-                
-        # Figure appearance
-        ax[1].invert_yaxis() 
-        ax[1].grid(color='gainsboro', linestyle=':')
-        
-        if colorbar:
-            relative_tick_locations = [0, 0.25, 0.5, 0.75, 1]
-            tick_locations = [i * (len(beta_plot)-1) for i in relative_tick_locations]
-            cbar = fig.colorbar(lc, ax=ax.ravel().tolist(), location='top', aspect=50)
-            cbar.set_ticks(tick_locations)
-            tick_labels = [round(i,2) for i in np.quantile(e_sort, relative_tick_locations[::-1])]
-            cbar.set_ticklabels(tick_labels)
-            cbar.set_label('Dispersion misfit [%]', fontweight='bold')
-            cbar.ax.invert_xaxis() 
-        
-        if return_axes: 
-            return fig, ax
-   
-    def plot_sampled_AP(self, max_depth, runs='all', figwidth=16, figheight=12, col_map='viridis', 
-                    colorbar=True, DC_yaxis='linear', return_axes=False, show_exp_dc=True, pseudo_depth=False, 
-                    plot_mean_exp_dc=True, axis_limits= None):
+    def plot_sampled(self, runs='all', col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=False, show_exp_dc=True, plot_mean_exp_dc=True):
+ 
         """
         Plot sampled shear wave velocity profiles (as interval velocity profiles) 
         and the corresponding theoretical dispersion curves. The shear wave 
@@ -2019,6 +1605,13 @@ class InvertDC():
         AttributeError
             If no sampled profiles exist.         
         """
+    
+        max_depth = self.settings['max_depth']
+        figwidth = self.settings['figsize'][0]
+        figheight = self.settings['figsize'][1]
+        pseudo_depth = self.settings['pseudo_depth']
+        axis_limits = self.settings['models_axes_lims']
+
         if not bool(self.profiles.get('n_layers')):
             message = 'No sampled profiles exist. The dictionary ´profiles´ contains None values.' 
             raise AttributeError(message)
@@ -2214,11 +1807,11 @@ class InvertDC():
         else:
             self.selected['z'] = z_temp
 
-    def plot_within_boundaries_MedianProfiles(self, profile, max_depth, c_test, initial,Vr_x_lim_low, Vr_x_lim_up , Vs_x_lim_low, Vs_x_lim_up, figsize,
-                                            show_all=True, runs='all', col_map='viridis', 
-                                            colorbar=True, DC_yaxis='linear', return_axes=False, pseudo_depth=True,
-                                            show_legend=True, up_low=False, remove_outliers=False,
-                                            remove_target=None, **kwargs):
+    def plot_within_boundaries_MedianProfiles(self, profile, initial, show_all=True, runs='all', col_map='viridis', 
+                                                colorbar=True, DC_yaxis='linear', return_axes=False,
+                                                show_legend=True, up_low=False, remove_outliers=False,
+                                                remove_target=None, **kwargs):
+
         """
         Plot sampled profiles whose theoretical dispersion curves fall 
         within the upper and lower boundaries of the experimental data. 
@@ -2271,6 +1864,15 @@ class InvertDC():
         ----------------
         All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
         """
+        max_depth = self.settings['max_depth']
+        c_test = self.settings['c_test']
+        figsize = self.settings['figsize']
+        pseudo_depth = self.settings['pseudo_depth']
+        axis_limits = self.settings['models_axes_lims']
+        Vr_x_lim = axis_limits[0]
+        Vs_x_lim = axis_limits[2]
+
+
         # Get shear wave velocity profiles whose theoretical dispersion curves fall within bounds
         self.within_boundaries(runs='all', threshold=1.0)
         if remove_outliers:
@@ -2285,9 +1887,9 @@ class InvertDC():
         if show_all:
             # Plot all sampled profiles in grey
             newcmp = ListedColormap(np.array([0.8, 0.8, 0.8, 1]))
-            fig, ax = self.plot_sampled_AP(max_depth,Vr_x_lim_low, Vr_x_lim_up , Vs_x_lim_low, Vs_x_lim_up, runs=runs, figwidth=figsize[0], figheight=figsize[1],
-                                        col_map=newcmp, colorbar=False, DC_yaxis=DC_yaxis,
-                                        return_axes=True, show_exp_dc=False, pseudo_depth=pseudo_depth)
+            fig, ax = self.plot_sampled(runs=runs, col_map=newcmp, colorbar=False, DC_yaxis=DC_yaxis,
+                                        return_axes=True, show_exp_dc=False)
+
             ax0_x0, ax0_x1 = ax[0].get_xlim()
             ax1_x0, ax1_x1 = ax[1].get_xlim()
         else:
@@ -2323,8 +1925,6 @@ class InvertDC():
         if (initial['n_unsat'] != 0):
             alpha[0:initial['n_unsat']] = alpha_unsat[0:initial['n_unsat']]
         h = np.array(self._z_to_h(z, n))
-        # Compute pseudodepth = 1/3 wavelength
-        pseudodepth = self.wavelength / 3.0
         # Compute theoretical dispersion curve
         c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype=np.float64)
         c_t = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, n, alpha, beta, initial['rho'], h, c_test['delta_c'])
@@ -2335,8 +1935,9 @@ class InvertDC():
         # Plot theoretical uncertainty bounds
         ax[0].plot(self.c_obs_low, y_vals, '--', color='k', label='Measured upper/lower')
         ax[0].plot(self.c_obs_up, y_vals, '--', color='k')
+
         # Plot median model theoretical dispersion curve using pseudodepth
-        #ax[0].plot(c_t, pseudodepth, color=col, label='Theoretical median')
+        #ax[0].plot(c_t, pseudo_depth, color=col, label='Theoretical median')
 
         # Plot shear wave velocity profiles
         beta_plot = self._beta_profile(self.selected['beta'])
@@ -2381,8 +1982,9 @@ class InvertDC():
             #             s.round_up_to_nearest(max(self.c_obs_up) + 10, 20))
             # ax[1].set_xlim(s.round_down_to_nearest(np.min(beta_plot) - 10, 20),
             #             s.round_up_to_nearest(np.max(beta_plot) + 10, 20))
-            ax[0].set_xlim(Vr_x_lim_low, Vr_x_lim_up)
-            ax[1].set_xlim(Vs_x_lim_low, Vs_x_lim_up)
+
+            ax[0].set_xlim(Vr_x_lim[0], Vr_x_lim[1])
+            ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
             
         if colorbar:
             cbar = fig.colorbar(lc, ax=ax.ravel().tolist(), location='top', aspect=50)
@@ -2413,139 +2015,9 @@ class InvertDC():
 
         if return_axes:
             return fig, ax
-    
-    
-    def plot_within_boundaries(self, max_depth, show_all=True, runs='all', figwidth=16, figheight=12, 
-                               col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=False, **kwargs):
-        
-        """
-        Plot sampled profiles whose theoretical dispersion curves fall 
-        within the upper and lower boundaries of the experimental data. 
-        The corresponding theoretical dispersion curves are compared to the 
-        experimental data. The shear wave velocity profiles/dispersion curves 
-        are sorted based on dispersion misfit values and displayed using 
-        a color scale. 
-        
-        Parameters
-        ----------
-        max_depth : int or float
-            Maximum depth of shear wave velocity profiles (for plotting) [m].
-        show_all : boolean, optional
-            Show all sampled shear wave velocity profiles/theoretical
-            dispersion curves (yes=True, no=False).
-        runs : str ('all'), int, list or numpy.ndarray, optional
-            Sampling scheme initiations (runs) that are to be displayed. 
-            Default is to combine and show all runs, i.e., runs='all'.
-            Alternatively, runs can be defined as an integer or a list/array
-            of integers, e.g.,
-            - runs=0: Show run no. 1.
-            - runs=1: Show run no. 2.
-            - runs=[0,1]: Show runs no. 1 and 2 (combined).
-        figwidth : int or float, optional
-            Width of figure in centimeters [cm].
-            Default is figwidth=16. 
-        figheight : int or float, optional
-            Height of figure in centimeters [cm].
-            Default is figheight=12.
-        col_map : str or Colormap, optional
-            Registered colormap name or a Colormap instance.
-            Default is col_map='viridis'.
-        colorbar : boolean, optional
-            Show colorbar (yes=True, no=False).
-            Default is colorbar=True.
-        DC_yaxis : {'linear', 'log'}, optional
-            Scale of dispersion curve wavelength axis. 
-            - DC_yaxis='linear': Linear scale for wavelengths.
-            - DC_yaxis='log': Logarithmic scale for wavelengths.
-            Default is DC_yaxis='linear'.
-        return_axes : boolean, optional
-            If return_axes is True, the initialized figure object and set of 
-            axes are returned. Default is return_axes=False.
-            
-        Returns
-        -------
-        fig : figure, optional
-            Figure object.
-        ax : axes object, optional 
-            The axes of the subplots. 
-        
-        Raises
-        ------
-        AttributeError
-            If no sampled profiles exist. 
-        
-        Other parameters
-        ----------------
-        All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
-        See https://matplotlib.org/3.1.1/api/collections_api.html#matplotlib.collections.LineCollection
-        for a list of valid kwargs.
-        
-        """
-        # Get shear wave velocity profiles whose theoretical dispersion curves fall 
-        # within the upper and lower boundaries of the experimental data. 
-        self.within_boundaries(runs=runs)
-        no_within = len(self.selected['c_t'])
-        
-        # Figure settings
-        if show_all:
-            # Plot all sampled profiles
-            newcmp = ListedColormap(np.array([0.8, 0.8, 0.8, 1]))
-            fig, ax = self.plot_sampled(max_depth, runs=runs, figwidth=figwidth, figheight=figheight, col_map=newcmp, 
-                      colorbar=False, DC_yaxis=DC_yaxis, return_axes=True, show_exp_dc=False)
-            ax0_x0, ax0_x1 = ax[0].get_xlim()
-            ax1_x0, ax1_x1 = ax[1].get_xlim()
-        else:    
-            fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth),s.cm_to_in(figheight)), constrained_layout=True)
-            ax[0].grid(color='gainsboro', linestyle=':')
-            ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
-            ax[0].set_ylabel('Wavelength [m]', fontweight='bold')
-            ax[1].grid(color='gainsboro', linestyle=':')
-            ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
-            ax[1].set_ylabel('Depth [m]', fontweight='bold')
-        
-        # Plot theoretical dispersion curves
-        lc = s.plot_lines(self.selected['c_t'], [self.wavelength for i in range(no_within)], list(range(no_within)), 
-                        ax=ax[0], cmap=col_map, lw=0.4, **kwargs)  
-        ax[0].plot(self.c_obs, self.wavelength, '-', color='k')
-        ax[0].plot(self.c_obs_low, self.wavelength, '--', color='k')
-        ax[0].plot(self.c_obs_up, self.wavelength, '--', color='k')
 
-        # Plot shear wave velocity profiles
-        beta_plot = self._beta_profile(self.selected['beta'])
-        z_plot = self._h_to_z_profile(self.selected['h'], max_depth)
-        s.plot_lines(beta_plot, z_plot, list(range(no_within)), ax=ax[1], cmap=col_map, lw=0.4, **kwargs)  
         
-        # Figure appearance
-        if type(DC_yaxis) is str and DC_yaxis.lower() == 'log':
-            ax[0].set_ylim(max(s.round_down_to_nearest(min(self.wavelength), 1), 0.1) , s.round_up_to_nearest(max(self.wavelength), 5))
-        else:
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(self.wavelength), 5))
-        ax[0].invert_yaxis()
-        ax[1].set_ylim(0, max_depth)
-        ax[1].invert_yaxis() 
-        if show_all:
-            ax[0].set_xlim(ax0_x0, ax0_x1)
-            ax[1].set_xlim(ax1_x0, ax1_x1)
-        else:
-            ax[0].set_xlim(s.round_down_to_nearest(min(self.c_obs_low)-10, 20), s.round_up_to_nearest(max(self.c_obs_up)+10, 20))
-            ax[1].set_xlim(s.round_down_to_nearest(np.min(beta_plot)-10, 20), s.round_up_to_nearest(np.max(beta_plot)+10, 20))
-        
-        if colorbar:
-            relative_tick_locations = [0, 0.25, 0.5, 0.75, 1]
-            tick_locations = [i * (len(beta_plot)-1) for i in relative_tick_locations]
-            cbar = fig.colorbar(lc, ax=ax.ravel().tolist(), location='top', aspect=50)
-            cbar.set_ticks(tick_locations)
-            tick_labels = [round(i,2) for i in np.quantile(self.selected['misfit'], relative_tick_locations[::-1])]
-            cbar.set_ticklabels(tick_labels)
-            cbar.set_label('Dispersion misfit [%]', fontweight='bold')
-            cbar.ax.invert_xaxis() 
-
-        if return_axes: 
-            return fig, ax
-        
-    def plot_within_boundaries_AP(self, max_depth, c_test, threshold, show_all=True, runs='all', figwidth=16, figheight=12, 
-                            col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=False, 
-                            pseudo_depth=True, axis_limits=None, **kwargs):
+    def plot_within_boundaries(self, show_all=True, runs='all', col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=False, **kwargs):
         """
         Plot sampled profiles whose theoretical dispersion curves fall 
         within the upper and lower boundaries of the experimental data. 
@@ -2598,9 +2070,15 @@ class InvertDC():
         ----------------
         All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
         """
+        max_depth = self.settings['max_depth']
+        figwidth = self.settings['figsize'][0]
+        figheight = self.settings['figsize'][1]
+        pseudo_depth = self.settings['pseudo_depth']
+        axis_limits = self.settings['models_axes_lims']
+
         # Get shear wave velocity profiles whose theoretical dispersion curves fall within bounds
         if self.settings['only_save_accepted'] == False:
-            self.within_boundaries(runs=runs, threshold=threshold)
+            self.within_boundaries(runs=runs)
         no_within = len(self.selected['c_t'])
 
         # Use λ/3 as y-axis if pseudo_depth is True
@@ -2611,9 +2089,7 @@ class InvertDC():
         if show_all:
             # Plot all sampled profiles in grey
             newcmp = ListedColormap(np.array([0.8, 0.8, 0.8, 1]))
-            fig, ax = self.plot_sampled_AP(max_depth, runs=runs, figwidth=figwidth, figheight=figheight,
-                                        col_map=newcmp, colorbar=False, DC_yaxis=DC_yaxis,
-                                        return_axes=True, show_exp_dc=False, pseudo_depth=pseudo_depth, axis_limits=axis_limits)
+            fig, ax = self.plot_sampled(runs=runs, col_map=newcmp, colorbar=False, DC_yaxis=DC_yaxis, return_axes=True, show_exp_dc=False)
             ax0_x0, ax0_x1 = ax[0].get_xlim()
             ax1_x0, ax1_x1 = ax[1].get_xlim()
         else:
@@ -2885,183 +2361,12 @@ class InvertDC():
             
         return median_profile_dict
 
-    
-    def plot_profile(self, profile, max_depth, c_test, initial, col='crimson', up_low=False, DC_yaxis='linear', 
-                     fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True, figwidth=16, figheight=12):
+
         
-        """
-        Plot the median or mean shear wave velocity profile. The associated 
-        theoretical dispersion curve is computed and compared to the experimental
-        data.
+    def plot_profile(self, profile,  initial, col='crimson', up_low=False, DC_yaxis='linear', 
+                    fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True):
         
-        Parameters
-        ----------
-        profile : dict
-            Dictionary containing the median or mean shear wave velocity profile.                                
-            
-            profile['beta'] : list 
-                Shear wave velocity [m/s].
-            profile['z'] : list 
-                Locations of layer interfaces [m/s].
-            
-            Required if up_low is True.
-            profile['beta_low'], profile['beta_up'] : list                     
-                Shear wave velocity [m/s], boundary values.
-            profile['z_low'], profile['z_up'] : list
-                Locations of layer interfaces [m/s], boundary values.            
-        
-        max_depth : int or float
-            Maximum depth of shear wave velocity profile (for plotting) [m]. 
-        c_test : dict
-            Dictionary containing information on testing Rayleigh wave phase
-            velocity values. For further information on c_test, please refer 
-            to the documentation of mc_inversion.          
-        initial : dict
-            Dictionary containing information on model parameterization and 
-            initial values for the testing shear wave velocity profile.
-            For further information on initial, please refer to the 
-            documentation of mc_inversion. 
-        col : a Matplotlib color or sequence of color, optional
-            Linecolor.
-            Default is col='crimson'.
-        up_low : boolean, optional
-            Show error bars for shear wave velocity and depth of layer 
-            interfaces (yes=True, no=False).
-            Default is up_low=False.
-        DC_yaxis : {'linear', 'log'}, optional
-            Scale of dispersion curve wavelength axis. 
-            - DC_yaxis='linear': Linear scale for wavelengths.
-            - DC_yaxis='log': Logarithmic scale for wavelengths.
-            Default is DC_yaxis='linear'.
-        fig : figure, optional
-            Figure object.
-            Default is fig=None, a new figure object is created.
-        ax : axes object, optional 
-            The axes of the subplots. 
-            Default is ax=None, a new set of axes is created.
-        return_axes : boolean, optional
-            If return_axes is True, the initialized figure object and set of 
-            axis are returned. 
-            Default is return_axes=False.
-        return_ct : boolean, optional
-            If return_ct is True, the theoretical dispersion curve associated
-            with the median or mean shear wave velocity profile is returned. 
-            Default is return_ct=False.
-        show_legend : boolean, optional
-            If show_legend is True, a legend is placed on the left-hand axis 
-            of the plot (i.e., the subplot showing the dispersion curves).
-            Default is show_legend=True.
-        figwidth : int or float, optional
-            Width of figure in centimeters [cm].
-            Default is figwidth=16. 
-        figheight : int or float, optional
-            Height of figure in centimeters [cm].
-            Default is figheight=12.           
 
-        Returns
-        -------
-        fig : figure, optional
-            Figure object.
-        ax : axes object, optional 
-            The axes of the subplots. 
-        c_t : numpy.ndarray, optional
-            Theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
-            The associated wavelengths are stored in self.wavelength.
-            
-        """
-
-        # Model parameters
-        beta = profile['beta']
-        z = profile['z']
-        n = initial['n']
-        beta = np.array(beta)
-        alpha_unsat = np.sqrt((2*(1 - initial['nu_unsat'])) / (1 - 2 * initial['nu_unsat'])) * beta
-        alpha = initial['alpha_sat'] * np.ones(len(beta))
-        if (initial['n_unsat'] != 0):
-            alpha[0:initial['n_unsat']] = alpha_unsat[0:initial['n_unsat']]
-        h = np.array(self._z_to_h(z, n))
-
-        # Compute theoretical dispersion curve
-        c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64) 
-        c_t = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, n, alpha, beta, initial['rho'], h, c_test['delta_c'])
- 
-    
-        if ax is None:
-            # Create a new figure window and set of axes
-            fig, ax = plt.subplots(1, 2, figsize=(s.cm_to_in(figwidth), s.cm_to_in(figheight)), constrained_layout=True)
-            
-            # Plot experimental dispersion curve
-            ax[0].plot(self.c_obs, self.wavelength,'-',color='k', label='Mean')
-            ax[0].plot(self.c_obs_low, self.wavelength, '--', color='k', label='Upper/lower')
-            ax[0].plot(self.c_obs_up, self.wavelength, '--', color='k')
-
-            ax[0].grid(color='gainsboro', linestyle=':')
-            ax[1].grid(color='gainsboro', linestyle=':')
-            
-            # Axes labels and limits 
-            ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
-            ax[0].set_ylabel('Wavelength [m]', fontweight='bold')
-            ax[0].set_xlim(s.round_down_to_nearest(min(min(c_t), min(self.c_obs_low)), 20), s.round_up_to_nearest(max(max(c_t), max(self.c_obs_up)), 20))
-            ax[0].set_ylim(0, s.round_up_to_nearest(max(self.wavelength), 5))
-            ax[0].invert_yaxis() 
-
-            ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
-            ax[1].set_ylabel('Depth [m]', fontweight='bold')
-            if up_low:
-                ax[1].set_xlim(s.round_down_to_nearest(min(profile['beta_low'])-10, 20), s.round_up_to_nearest(max(profile['beta_up'])+10, 20))
-            else:
-                ax[1].set_xlim(s.round_down_to_nearest(min(beta)-10, 20), s.round_up_to_nearest(max(beta)+10, 20))
-            ax[1].set_ylim(0, max_depth)
-            ax[1].invert_yaxis() 
-                     
-        # Plot theoretical dispersion curve
-        ax[0].plot(c_t, self.wavelength, c=col, label='Theoretical')
-                
-        # Plot shear wave velocity profile (central values)
-        beta_plot = self._beta_profile(beta)
-        z_plot = self._z_profile(z, max_depth)
-        ax[1].plot(beta_plot, z_plot, c=col)
-
-        if up_low:
-            # Vertical error bars (boundaries for z)
-            z_error_xdata = [0.5*(beta[i] + beta[i+1]) for i in range(n)]
-            z_error_up = [profile['z_up'][i] - z[i] for i in range(n)]
-            z_error_low = [z[i] - profile['z_low'][i] for i in range(n)]
-            ax[1].errorbar(z_error_xdata, z, yerr=[z_error_low,z_error_up], c=col, barsabove=True, 
-              ls='none', fmt='.', capsize=3)
-            
-            # Horizontal error bars (boundaries for Vs)
-            z_temp =  [0] + [z[i] for i in range(n)] + [max(max_depth, z[-1])]
-            beta_error_ydata = [0.5*(z_temp[i] + z_temp[i+1]) for i in range(n+1)]
-            beta_error_up = [profile['beta_up'][i] - beta[i] for i in range(n+1)]
-            beta_error_low = [beta[i] - profile['beta_low'][i] for i in range(n+1)]
-            ax[1].errorbar(beta, beta_error_ydata, xerr=[beta_error_low,beta_error_up], c=col, barsabove=True, 
-              ls='none', fmt='.', capsize=3)
-
-        # Figure appearance
-        fig.set_size_inches(s.cm_to_in(figwidth), s.cm_to_in(figheight))    
-        
-        if type(DC_yaxis) is str and DC_yaxis.lower() == 'linear':
-            ax[0].set_yscale('linear')
-        elif type(DC_yaxis) is str and DC_yaxis.lower() == 'log':
-            ax[0].set_yscale('log')
-        else:
-            ax[0].set_yscale('linear')
-            warnings.warn('Scale of wavelength axis (DC_yaxis) not recognized. Dispersion curves displayed on a linear wavelength scale (default setting).')
-
-        # Create legend
-        if show_legend:
-            ax[0].legend(frameon=False)
-         
-        if return_axes:
-            return fig, ax
-        
-        if return_ct:
-            return c_t
-        
-    def plot_profile_AP(self, profile, max_depth, c_test, initial, col='crimson', up_low=False, DC_yaxis='linear', 
-                    fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True, figwidth=16, figheight=12, 
-                    axis_limits=None):
         """
         Plot the median or mean shear wave velocity profile. The associated 
         theoretical dispersion curve is computed and compared to the experimental
@@ -3124,6 +2429,12 @@ class InvertDC():
             Theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
             The associated wavelengths are stored in self.wavelength.
         """
+
+        c_test = self.settings['c_test']
+        max_depth = self.settings['max_depth']
+        figwidth = self.settings['figsize'][0]
+        figheight = self.settings['figsize'][1]
+        axis_limits = self.settings['models_axes_lims']
 
         # Model parameters
         beta = profile['beta']
@@ -3228,8 +2539,11 @@ class InvertDC():
         if return_ct:
             return c_t
         
-    def plot_profile_ReportFigs(self, profile, max_depth, c_test, initial, Vr_x_lim_low, Vr_x_lim_up , Vs_x_lim_low, Vs_x_lim_up, figsize, col='crimson', up_low=False, DC_yaxis='linear', 
+    def plot_profile_ReportFigs(self, profile, initial, col='crimson', up_low=False, DC_yaxis='linear', 
                     fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True):
+        
+
+
         """
         Plot the median or mean shear wave velocity profile. The associated 
         theoretical dispersion curve is computed and compared to the experimental
@@ -3295,6 +2609,13 @@ class InvertDC():
             The associated wavelengths are stored in self.wavelength.
         """
 
+        c_test = self.settings['c_test']
+        max_depth = self.settings['max_depth']
+        figsize = self.settings['figsize']
+        axis_limits = self.settings['models_axes_lims']
+        Vr_x_lim = axis_limits[0]
+        Vs_x_lim = axis_limits[2]
+
         # Model parameters
         beta = profile['beta']
         z = profile['z']
@@ -3325,19 +2646,21 @@ class InvertDC():
             ax[0].grid(color='gainsboro', linestyle=':')
             ax[1].grid(color='gainsboro', linestyle=':')
 
+
+
             # Axes labels and limits
             ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
             ax[0].set_ylabel('Pseudodepth (1/3 wavelength) [m]', fontweight='bold')
-            ax[0].set_xlim(Vr_x_lim_low, Vr_x_lim_up)
+            ax[0].set_xlim(Vr_x_lim[0], Vr_x_lim[1])
             ax[0].set_ylim(0, s.round_up_to_nearest(max(pseudodepth), 5))
             ax[0].invert_yaxis()
 
             ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
             ax[1].set_ylabel('Depth [m]', fontweight='bold')
             if up_low:
-                ax[1].set_xlim(Vs_x_lim_low, Vs_x_lim_up)
+                ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
             else:
-                ax[1].set_xlim(Vs_x_lim_low, Vs_x_lim_up)
+                ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
                 
             ax[0].set_ylim(0, max_depth)
             ax[0].invert_yaxis()
@@ -3388,8 +2711,10 @@ class InvertDC():
         if return_ct:
             return c_t
         
-    def plot_Nprofiles_AP(self, profile, line, max_depth, c_test, initial, Vr_x_lim_low, Vr_x_lim_up , Vs_x_lim_low, Vs_x_lim_up, figsize, col='crimson', up_low=False, DC_yaxis='linear', 
+    def plot_Nprofiles(self, profile, line, initial, col='crimson', up_low=False, DC_yaxis='linear', 
                     fig=None, ax=None, return_axes=False, return_ct=False, show_legend=True):
+        
+
         """
         Plot multiple median or mean shear wave velocity profiled. The associated 
         theoretical dispersion curve is computed and compared to the experimental
@@ -3452,6 +2777,12 @@ class InvertDC():
             Theoretical dispersion curves, Rayleigh wave phase velocity [m/s].
             The associated wavelengths are stored in profile.wavelength.
         """
+        c_test = self.settings['c_test']
+        max_depth = self.settings['max_depth']
+        figsize = self.settings['figsize']
+        axis_limits = self.settings['models_axes_lims']
+        Vr_x_lim = axis_limits[0]
+        Vs_x_lim = axis_limits[2]
 
         # Model parameters
         beta = profile['beta']
@@ -3467,13 +2798,10 @@ class InvertDC():
         # Compute theoretical dispersion curve
         c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype=np.float64)
         c_t_profile = t_dc.compute_fdma(c_vec, c_test['step'], self.wavelength, n, alpha, beta, initial['rho'], h, c_test['delta_c'])
-        self.e_median_profile = self.misfit_AP(c_t_profile, self.wavelength, beta, h, self.uncertainty_weighting, self.c_obs_abs_unc, depth_weights=self.depth_weights, offset_const=self.depth_weight_offset_const, 
-                                mode=self.misfit_mode, plot_weights_file=False, regularisation=self.regularisation, regularisation_weights=self.regularisation_weights, 
-                                regularisation_ranges=self.regularisation_ranges)
+
+        self.e_median_profile = self.misfit(c_t_profile, beta, h)
         
         # resample mean observed curve at evenly spaced pseudodepth intervals
-        
-
         # Compute pseudodepth = 1/3 wavelength
         pseudodepth = self.wavelength / 3.0
 
@@ -3488,7 +2816,7 @@ class InvertDC():
         # Axes labels and limits
         ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
         ax[0].set_ylabel('Pseudodepth (1/3 wavelength) [m]', fontweight='bold')
-        ax[0].set_xlim(Vr_x_lim_low, Vr_x_lim_up)
+        ax[0].set_xlim(Vr_x_lim[0], Vr_x_lim[1])
         ax[0].set_ylim(0, max_depth)
         ax[0].invert_yaxis()
 
@@ -3497,9 +2825,9 @@ class InvertDC():
         if up_low:
             # ax[1].set_xlim(s.round_down_to_nearest(min(profile['beta_low']) - 10, 20),
             #             s.round_up_to_nearest(max(profile['beta_up']) + 10, 20))
-            ax[1].set_xlim(Vs_x_lim_low, Vs_x_lim_up)
+            ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
         else:
-            ax[1].set_xlim(Vs_x_lim_low, Vs_x_lim_up)
+            ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
         ax[1].set_ylim(0, max_depth)
         ax[1].invert_yaxis()
 
