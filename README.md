@@ -1,6 +1,34 @@
-# MASWavesPy
+# MASWavesPy 
 
 MASWavesPy (`maswavespy`) is a Python package for processing and inverting MASW data, developed at the Faculty of Civil and Environmental Engineering, University of Iceland. 
+
+This fork has been adapted for use by Zetica, development is ongoing. Speak to AP if using code.
+
+## Installation of Zetica fork using pip
+This fork of the MASWavesPy package is installed using pip from a cloned directory.
+
+1. (If required) Download and install [Miniconda]  (https://www.anaconda.com/download). 
+2. (If required) Install [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). The Microsoft C++ Build Tools are required for building the package on Windows.
+3. Open a terminal window (currently tested with command prompt) in your preferred local (C drive) directory and enter:
+
+`git clone https://github.com/AndrewPret/maswavespy.git`
+
+4. Once repo has been cloned navigate into the local repo's directory with:
+
+`cd maswavespy`
+
+5. Strongly recommended to install in a fresh conda environment with python 3.13 (masw_env is given as an example, name it anything you want) to avoid package compatibility issues:
+
+`conda create -n masw_env python=3.13`
+`conda activate masw_env`
+
+6. Install from the local repo using:
+
+`pip install -e .`
+
+7. Install required packages: TBC
+
+### Old readme information below
 
 ### Table of contents 
 - [About MASWavesPy](#about-maswavespy)
@@ -56,16 +84,6 @@ This work was supported by the Icelandic Research Fund [grant numbers 206793-052
 > (4) Olafsdottir, E.A., Erlingsson, S., Bessason, B. (2020). Open-Source MASW Inversion Tool Aimed at Shear Wave Velocity Profiling for Soil Site Explorations, _Geosciences_, 10(8), 322. [https://doi.org/10.3390/geosciences10080322](https://doi.org/10.3390/geosciences10080322)
 > 
 > (5) Olafsdottir, E.A., Bessason, B., Erlingsson, S., Kaynia, A.M. (2024). A Tool for Processing and Inversion of MASW Data and a Study of Inter-Session Variability of MASW. Accepted for publication in _Geotechnical Testing Journal_ (in press).
-
-## Installation
-A [Quick Start Guide](#quick-start-guide) describing the recommended workflow for Windows users is provided below.
-
-### General installation using pip
-The MASWavesPy package is installed using pip. 
-
-`pip install maswavespy`
-
-Wheels for Windows, Linux and Mac distributions can also be downloaded from [PyPI](https://pypi.org/project/maswavespy/#files).
 
 
 ### Recommendations
