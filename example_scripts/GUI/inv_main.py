@@ -45,7 +45,6 @@ def MASW_inv_main(config):
     site = config['site']
     line_list = config['line_list']
     working_dir = config['working_dir']
-    main_data_dir = config['main_data_dir']
     data_dir_list = config['data_dir_list']
     main_initial_file = config['main_initial_file']
     ignore_files = config['ignore_files']
@@ -122,7 +121,18 @@ def MASW_inv_main(config):
         c_low = combDC_obj.resampled['c_low']
         c_up = combDC_obj.resampled['c_up']
         wavelengths = combDC_obj.resampled['wavelength']
-        
+
+        if settings['file_initial_model'] == False:
+            min_wl=min(wavelengths)
+            max_wl=max(wavelengths)
+            df = zutil.auto_initial_model(min_wl, max_wl, settings)
+
+            #Save to CSV
+            df.to_csv(rf"{initial_model_dir}\auto_initial_model.csv", index=False)  
+            df.to_csv(rf"{inversion_dir}\auto_initial_model.csv", index=False)  
+
+            main_initial_file = rf"{initial_model_dir}\auto_initial_model.csv"      
+
         # Create new inversion object for the line
         inv_obj = inversion.InvertDC(
             site, line, c_mean, c_low, c_up, wavelengths, settings
@@ -160,6 +170,8 @@ def MASW_inv_main(config):
         print("  [5] Loading and plotting initial models...")
         for j, initial_file in enumerate(initial_file_list):
             
+
+
             # Load initial model
             initial = zutil.import_initial_model(initial_file, settings)
             initial_list.append(initial)
@@ -312,7 +324,7 @@ if __name__ == "__main__":
             'a_values': {'VR - 7': 2},
             'only_save_accepted': False,
             'c_test': {'min': 100, 'max': 1100, 'step': 0.2, 'delta_c': 3},
-            'run': 10,
+            'N_runs': 10,
             'N_max': 100,
             'repeat_run_if_fail': False,
             'run_success_minimum': 0,

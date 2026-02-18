@@ -1265,7 +1265,7 @@ class InvertDC():
         
         # Initiate lists for temporarily storing sampled shear wave velocity 
         # profiles and associated dispersion curves/dispersion misfit values
-        run = settings['run']
+        run = settings['N_runs']
         beta_all = [None for i in range(run)]
         alpha_all = [None for i in range(run)]
         h_all = [None for i in range(run)]
