@@ -927,15 +927,24 @@ class MASWInversionGUI:
             # Validate and populate config
             self.populate_config()
             self.status.config(text="Configuration validated, preparing inversion...")
+
+            # Confirm with user
+            if self.config['overwrite_dir'] == True:
+                overwrite_check = messagebox.askyesno(
+                    "Overwrite results is enabled, previous results will be lost.\n\n"
+                    "Are you sure you want to proceed?"
+                )
+                if not overwrite_check:
+                    self.status.config(text="Cancelled by user")
+                    return
             
             # Confirm with user
             confirm = messagebox.askyesno(
                 "Start Inversion",
                 f"Start MASW inversion for site '{self.config['site']}'?\n\n"
-                f"Lines: {', '.join(self.config['line_list'])}\n"
-                f"Results Dir: {self.config['results_dir']}\n"
-                f"Data Dir: {self.config['main_data_dir']}\n"
-
+                f"Lines: {', '.join(self.config['line_list'])}\n\n"
+                f"Results Dir:\n    {self.config['results_dir']}\n\n"
+                f"Data Dir:\n   {self.config['main_data_dir']}\n\n"
             )
             
             if not confirm:
