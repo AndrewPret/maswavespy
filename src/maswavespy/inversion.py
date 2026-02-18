@@ -354,7 +354,7 @@ class InvertDC():
         plot_weights_file : bool or str, default=False
             If string (filename), save a plot of the applied weights.
 
-        regularisation : {'dc', 'model', False}, default=False
+        regularisation : {'DC', 'Vs model', False}, default=False
             Regularization type:
                 - 'dc': smoothness penalty on dispersion curve
                 - 'model': smoothness penalty on Vs profile
@@ -454,7 +454,7 @@ class InvertDC():
         # =======================================================
 
         # ---- Model smoothness penalty ----
-        if regularisation == "model":
+        if regularisation == "Vs model":
             
             diffs = np.diff(model_Vs, n=2)
             top_depths = np.insert(np.cumsum(model_h), 0, 0)

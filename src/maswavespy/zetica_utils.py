@@ -173,7 +173,61 @@ def import_initial_model(initial_model_file, settings):
     
     return initial
 
-# utilities
+def auto_initial_model(min_wl, max_wl, settings):
+
+    min_layers = settings['auto_min_layers']
+    max_layers = settings['auto_max_layers']
+    geom_factor = settings['auto_geom_factor']
+    start_Vs = settings['auto_start_Vs']
+    const_rho = settings['auto_rho']
+    const_Vp = settings['auto_Vp']
+    const_nu = settings['const_nu']
+    min_h = min_wl / 3
+    max_depth = max_wl / 3
+
+    layer_h_list = [min_h]
+
+    # # grow geometrically but stop if the next layer would exceed max_depth
+    # while (sum(layer_h_list) + layer_h_list[-1] * geom_factor) <= max_depth and len(layer_h_list) < max_layers:
+    #     layer_h_list.append(layer_h_list[-1] * geom_factor)
+
+    # # ensure at least min_layers
+    # while len(layer_h_list) < min_layers and (sum(layer_h_list) + layer_h_list[-1] * geom_factor) <= max_depth:
+    #     layer_h_list.append(layer_h_list[-1] * geom_factor)
+
+    # grow geometrically until total depth EXCEEDS max_depth or hit max_layers
+    while sum(layer_h_list) <= max_depth and len(layer_h_list) < max_layers:
+        layer_h_list.append(layer_h_list[-1] * geom_factor)
+
+    # ensure at least min_layers (even if this pushes past max_depth)
+    while len(layer_h_list) < min_layers and len(layer_h_list) < max_layers:
+        layer_h_list.append(layer_h_list[-1] * geom_factor)
+
+    # build rows
+    rows = []
+    for i, h in enumerate(layer_h_list, start=1):
+        rows.append({
+            "layer no": i,
+            "h [m]": round(h, 6),
+            "Vs [m/s]": start_Vs,
+            "rho [kg/m3]": const_rho,
+            "saturated/unsaturated": "unsat" if i == 1 else "sat",
+            "Vp [m/s]": "" if i == 1 else const_Vp,
+            "nu [-]": const_nu if i == 1 else ""
+        })
+
+    # add half-space (no thickness)
+    rows.append({
+        "layer no": f"{len(rows)+1} (half-space)",
+        "h [m]": "",
+        "Vs [m/s]": start_Vs,
+        "rho [kg/m3]": const_rho + 200,  # example: denser half-space
+        "saturated/unsaturated": "sat",
+        "Vp [m/s]": const_Vp,
+        "nu [-]": ""
+    })
+
+    return pd.DataFrame(rows)
 
 
 
