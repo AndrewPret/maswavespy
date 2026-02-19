@@ -36,52 +36,38 @@ def results_directories(working_dir, overwrite_dir, site):
 
     return results_dir, inversion_dir, initial_model_dir
 
-def data_import(line, line_data_dir, line_inv_dir, points_to_remove=None, ignore_files=None):
+def data_import(line, line_data_dir, line_inv_dir=None, points_to_remove=None, ignore_files=None):
     """ function to import .dc file picks and convert them into correct format for MASWavesPy"""
     file_pattern = os.path.join(line_data_dir, "*.dc") 
-    file_list_full = sorted(glob.glob(file_pattern))   # select all files within data directory with .dc extension
+    file_list_full = sorted(glob.glob(file_pattern))
     if ignore_files:
         file_list = [f for f in file_list_full if basename(f) not in ignore_files]
     else:
         file_list = file_list_full
 
-    f_combined = []  # initialise list to store frquency pick values extracted from .dc files
-    c_combined = []  # initialise list to store velocity pick values
+    f_combined = []
+    c_combined = []
 
-    # loop through .dc files, extract frequency and velocity values and combine into a single nested list
     for file in file_list:
-        f, c = load_SWPicker_DC(file) # load freq
+        f, c = load_SWPicker_DC(file)
         if points_to_remove:
-            # line-specific trimming
             line_boxes = points_to_remove.get(line, [])
             f, c = remove_points_in_boxes(f, c, line_boxes)
-            # Global trimming (applies to all lines)
             global_boxes = points_to_remove.get('ALL', [])
             f, c = remove_points_in_boxes(f, c, global_boxes)
-        # combine into lists of all f and all c values 
         f_combined.append(f)
         c_combined.append(c)
 
-    # save nested lists to file
-    save_list_matrix_to_txt(c_combined, rf"{line_inv_dir}\{line}_c_combined_list.txt")
-    save_list_matrix_to_txt(f_combined, rf"{line_inv_dir}\{line}_f_combined_list.txt")
+    if line_inv_dir:
+        save_list_matrix_to_txt(c_combined, rf"{line_inv_dir}\{line}_c_combined_list.txt")
+        save_list_matrix_to_txt(f_combined, rf"{line_inv_dir}\{line}_f_combined_list.txt")
 
-    # Path to data
-    filename_c = rf"{line_inv_dir}\{line}_c_combined_list.txt" # phase velocity
-    filename_f = rf"{line_inv_dir}\{line}_f_combined_list.txt" # frequency
-
-    # load previously saved c and f values
-    with open(filename_c, 'r') as file_c:
-        c_vec = [np.array([float(value) for value in line.split()]) for line in file_c]
-
-    with open(filename_f, 'r') as file_f:
-        f_vec = [np.array([float(value) for value in line.split()]) for line in file_f]
-
-    del file_c, file_f # file_c and file_f are only used for the import, deleted here
+    f_vec = [np.array(f) for f in f_combined]
+    c_vec = [np.array(c) for c in c_combined]
 
     return f_vec, c_vec
 
-def dc_resamp_and_plot(line, combDC_obj, dc_freq_file, dc_wl_file, dc_resamp_file):
+def dc_resamp_and_plot(line, combDC_obj, dc_freq_file=None, dc_wl_file=None, dc_resamp_file=None):
 
     a = combDC_obj.settings['a_values'].get(line, 2)  # defaults to 2 if line not found
     no_std = combDC_obj.settings['no_std']
