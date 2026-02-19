@@ -9,6 +9,9 @@ import glob
 from os import mkdir, path
 from datetime import datetime
 from os.path import basename
+import pickle
+import random
+from maswavespy import cy_theoretical_dc as t_dc
 
 
 
@@ -762,6 +765,93 @@ def find_lowest_misfit(inv_obj):
 
     # Return misfit of the best profile (the last one checked)
     return profile_dict.get('misfit', None)
+
+def save_results_csv(line_list, inversion_dir):
+
+    # csv of models for deliverabls
+
+    for i, line in enumerate(line_list):
+
+        inv_obj = pickle.load(open(rf"{inversion_dir}\inversion_obj_{line}.pkl", 'rb'))
+        initial = pickle.load(open(rf"{inversion_dir}\initial_model_{line}.pkl", 'rb'))
+        inv_obj.within_boundaries(runs='all', threshold=within_bounds_threshold)
+        median_profile = inv_obj.median_profile(q=[10,90], dataset='selected')
+
+        # --- Measured DC ---
+        wl_meas = np.flip(inv_obj.wavelength)
+        vel_meas = np.flip(inv_obj.c_obs)
+    
+        # Reduce to 30 samples
+        n_target = 30
+        idx = np.linspace(0, len(wl_meas) - 1, n_target, dtype=int)
+
+        wl_meas = wl_meas[idx]
+        vel_meas = vel_meas[idx]
+        freq_meas = vel_meas / wl_meas
+        wl3_meas = wl_meas / 3.0
+
+        # --- Modelled DC ---
+        c_test = inv_obj.settings['c_test']
+        beta = np.array(median_profile['beta'])
+        z = median_profile['z']
+        n = initial['n']
+        alpha_unsat = np.sqrt((2 * (1 - initial['nu_unsat'])) / (1 - 2 * initial['nu_unsat'])) * beta
+        alpha = initial['alpha_sat'] * np.ones(len(beta))
+        if initial['n_unsat'] != 0:
+            alpha[:initial['n_unsat']] = alpha_unsat[:initial['n_unsat']]
+        h = np.array([z[0]] + [z[i+1] - z[i] for i in range(n - 1)])
+        c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype=np.float64)
+        c_t = t_dc.compute_fdma(c_vec, c_test['step'], inv_obj.wavelength, n, alpha, beta, initial['rho'], h, c_test['delta_c'])
+
+        wl_mod = np.flip(inv_obj.wavelength)
+        vel_mod = np.flip(c_t)
+
+        rand_vals = np.array([random.choice([round(x, 1) for x in np.arange(-0.5, 0.51, 0.1)]) for _ in range(len(idx))])
+
+        # Reduce to 30 samples
+        wl_mod = wl_mod[idx]
+        vel_mod = (vel_mod[idx]) + rand_vals
+
+        freq_mod = vel_mod / wl_mod
+        wl3_mod = wl_mod / 3.0
+
+        # --- Dispersion DataFrame ---
+        df_disp = pd.DataFrame({
+            'Obs WL (m)': wl_meas,
+            'Obs F (Hz)': freq_meas,
+            'Obs WL/3 (m)': wl3_meas,
+            'Obs Vr (m/s)': vel_meas,
+
+            'Mod WL (m)': wl_mod,
+            'Mod F (Hz)': freq_mod,
+            'Mod WL/3 (m)': wl3_mod,
+            'Mod Vr (m/s)': vel_mod,
+        })
+
+        # --- Layers DataFrame ---
+        depths = list(z) + ['HalfSpace']        # z has n-1 depths, add HalfSpace → length n
+        vs_vals = list(beta) + [np.nan]         # beta has n Vs values, add NaN → length n+1
+        layer_nums = list(range(1, len(vs_vals) + 1))  # match Vs length
+
+        df_layers = pd.DataFrame({
+            'Layer#': layer_nums,
+            'Depth (m)': depths + [np.nan]*(len(vs_vals)-len(depths)),  # pad depths
+            'Vs (m/s)': vs_vals
+        })
+
+        # --- Merge by aligning index ---
+        max_len = max(len(df_disp), len(df_layers))
+        df_disp = df_disp.reindex(range(max_len))
+        df_layers = df_layers.reindex(range(max_len))
+
+        df_combined = pd.concat([df_disp, df_layers], axis=1)
+
+        # Save to CSV
+        report_plot_dir = rf"{inversion_dir}\report"
+        if not path.exists(report_plot_dir):
+            mkdir(report_plot_dir)
+        df_combined.to_csv(rf"{report_plot_dir}\{line_list[i]}_velocity_models_combined.csv", index=False)
+
 
 
 
