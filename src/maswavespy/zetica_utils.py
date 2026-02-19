@@ -73,8 +73,7 @@ def dc_resamp_and_plot(line, combDC_obj, dc_freq_file=None, dc_wl_file=None, dc_
     no_std = combDC_obj.settings['no_std']
     resample_n = combDC_obj.settings['resample_n']
     figsize = combDC_obj.settings['figsize']
-    axis_limits = combDC_obj.settings['dc_axis_limits']
-    resamp_max_pdepth = combDC_obj.settings['resamp_max_pdepth']
+    axis_limits = combDC_obj.settings['axes_limits'][:2]
 
     # View the imported experimental DCs in frequency domain and evaluate the variation in DCs estimates
     # with frequency in terms of the coefficient of variation.
@@ -100,10 +99,7 @@ def dc_resamp_and_plot(line, combDC_obj, dc_freq_file=None, dc_wl_file=None, dc_
     # at no_points logarithmically or linearly spaced points
     no_points = resample_n
     wavelength_min = 'default'
-    if resamp_max_pdepth:
-        wavelength_max = resamp_max_pdepth*3
-    else:
-        wavelength_max = 'default'
+    wavelength_max = 'default'
     smoothing = combDC_obj.smoothing
 
     space = 'log' # Logarithmic sampling is recommended 
@@ -520,7 +516,7 @@ def plot_accepted_models(line, inv_obj, inversion_dir, save_file, individual_run
         if not path.exists(single_runs_accepted):
             mkdir(single_runs_accepted)
         inv_obj.within_boundaries(runs='all')
-        for run in range(inv_obj.settings["run"]):
+        for run in range(inv_obj.settings["N_runs"]):
             fig, ax = inv_obj.plot_within_boundaries(show_all=True, runs=run,
                             col_map='viridis', colorbar=True, DC_yaxis='linear', return_axes=True)
             fig.suptitle(f'Accepted models (within experimental DC uncertainty bounds) - {line}')
@@ -747,7 +743,7 @@ def plot_misfit_bh_bs(inv_obj, inversion_dir, line):
     plt.savefig(os.path.join(inversion_dir, f"{line}_bs_evolution.png"))
     plt.close()
 
-def find_lowest_misfit(inv_obj, initial, max_depth, c_test):
+def find_lowest_misfit(inv_obj):
     lowest_misfit_profiles = {}
     no_profiles = 1
     # Ensure that at least no_profiles fall within the experimental DC boundaries

@@ -51,10 +51,13 @@ class MASWInversionGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("MASW Inversion - Configuration Manager")
-        self.root.geometry("800x800")
+        self.root.geometry("700x800")
 
+        # # Custom icon
+        # icon = tk.PhotoImage(file="icon-16.png")
+        # root.iconphoto(True, icon)
 
-        self.wrap_length = 400
+        self.wrap_length = 500
         
         # Central config storage - this gets passed to MASW_inv_main()
         self.config = {
@@ -67,7 +70,6 @@ class MASWInversionGUI:
             'ignore_files': [],
             'main_initial_file': '',
             'overwrite_dir': False,
-            'max_depth': 15,
             'points_to_remove': None,
             'results_dir': '',
             'inversion_dir': '',
@@ -121,7 +123,7 @@ class MASWInversionGUI:
             "a_values": self.a_values,
             "figsize_w": self.figsize_w,
             "figsize_h": self.figsize_h,
-            "max_depth": self.max_depth_spinbox,
+            #"max_depth": self.max_depth_spinbox,
             "no_std": self.no_std,
             "resample_n": self.resample_n,
             "c_min": self.c_min,
@@ -156,6 +158,14 @@ class MASWInversionGUI:
             "auto_const_rho": self.auto_const_rho,
             "auto_const_Vp": self.auto_const_Vp,
             "auto_const_nu": self.auto_const_nu,
+            "models_dc_xmin":  self.models_dc_xmin,
+            "models_dc_xmax":  self.models_dc_xmax,
+            "models_dc_ymin":  self.models_dc_ymin,
+            "models_dc_ymax":  self.models_dc_ymax,
+            "models_mod_xmin": self.models_mod_xmin,
+            "models_mod_xmax": self.models_mod_xmax,
+            "models_mod_ymin": self.models_mod_ymin,
+            "models_mod_ymax": self.models_mod_ymax,
         }
 
     def _get_checkvar_map(self):
@@ -318,7 +328,7 @@ class MASWInversionGUI:
 
         # Insert combined values as table
         for id_, a_value in zip(ids, a_values):
-            self.line_ids_listbox.insert(tk.END, f"{id_:<10}  -  {a_value:>10}")
+            self.line_ids_listbox.insert(tk.END, f"{id_:<10}   ->  {a_value:>10}")
     
     def add_spinbox(self, parent, label, default, from_val, to_val, row=0, increment=1):
         """Add spinbox field."""
@@ -361,6 +371,119 @@ class MASWInversionGUI:
 
         return entry
 
+    # DC preview without running full script
+    def preview_dc(self):
+        """Load and preview dispersion curves without running full inversion."""
+        try:
+            self.populate_config()
+        except ValueError as e:
+            messagebox.showerror("Validation Error", str(e))
+            return
+
+        # Let user select which line to preview if multiple
+        lines = self.config['line_list']
+        if len(lines) > 1:
+            win = tk.Toplevel(self.root)
+            win.title("Select Line")
+            win.geometry("250x100")
+            ttk.Label(win, text="Select line to preview:").pack(pady=5)
+            line_var = tk.StringVar(value=lines[0])
+            ttk.Combobox(win, textvariable=line_var, values=lines, state="readonly").pack(pady=5)
+            ttk.Button(win, text="Preview", command=lambda: [win.destroy(), self._run_dc_preview(line_var.get())]).pack(pady=5)
+        else:
+            self._run_dc_preview(lines[0])
+
+    def _run_dc_preview(self, line):
+        """Run DC resampling and display plots in a popup window."""
+        import threading
+        thread = threading.Thread(target=self._dc_preview_thread, args=(line,), daemon=True)
+        thread.start()
+
+    def _dc_preview_thread(self, line):
+        try:
+            self.status.config(text="⏳ Loading dispersion curves...")
+
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.figure import Figure
+            import matplotlib.pyplot as plt
+            from maswavespy.combination import CombineDCs
+            from maswavespy.zetica_utils import data_import
+
+            config = self.config
+            settings = config['settings']
+            line_data_dir = os.path.join(config['main_data_dir'], line)
+            
+            f_vec, c_vec = data_import(line, line_data_dir)
+            
+            pre_combDC_obj = CombineDCs(config['site'], line, settings, freq=f_vec, c=c_vec)
+
+            # Run the processing steps, capturing figures instead of saving
+            a = settings['a_values'].get(line, 2)
+            no_std = settings['no_std']
+            resample_n = settings['resample_n']
+            figsize = settings['figsize']
+            axis_limits = settings['axes_limits'][:2]
+
+            pre_combDC_obj.dc_cov()
+            fig1, ax1 = pre_combDC_obj.plot_dc_cov(figwidth=figsize[0], figheight=figsize[1])
+            ax1[0].set_title("Picked points")
+            ax1[1].set_title("Coefficient of variation (COV)")
+            fig1.suptitle(f"Experimental dispersion curves, {line}")
+
+            pre_combDC_obj.dc_combination(a, no_std=no_std)
+            fig2, ax2 = pre_combDC_obj.plot_combined_dc(plot_all=True, pseudo_depth=True, axis_limits=axis_limits)
+            fig2.suptitle(f"Composite DC, {line}")
+
+            wavelength_min = 'default'
+            wavelength_max = 'default'
+            smoothing = pre_combDC_obj.smoothing
+            fig3, ax3 = pre_combDC_obj.resample_dc(resample_n, 'log', smoothing, wavelength_min, wavelength_max,
+                                                show_fig=True, pseudo_depth=True, axis_limits=axis_limits)
+            fig3.suptitle(f"Resampled comp. DC, a = {a}, {line}")
+
+            # Display in tkinter window on main thread
+            self.root.after(0, lambda: self._show_dc_preview_window(line, fig1, fig2, fig3))
+            self.status.config(text="✓ Preview ready")
+
+        except Exception as e:
+            self.status.config(text="✗ Preview failed")
+            messagebox.showerror("Preview Error", str(e))
+
+    def _show_dc_preview_window(self, line, fig1, fig2, fig3):
+        """Display the 3 DC figures in a single scrollable window."""
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        win = tk.Toplevel(self.root)
+        win.title(f"DC Preview — {line}")
+        win.geometry("1000x800")
+
+        # Scrollable canvas
+        outer = ttk.Frame(win)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(outer, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        canvas = tk.Canvas(outer, yscrollcommand=scrollbar.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=canvas.yview)
+
+        inner = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        # Embed each figure
+        for fig in [fig1, fig2, fig3]:
+            embed = FigureCanvasTkAgg(fig, master=inner)
+            embed.draw()
+            embed.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=5)
+
+        inner.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox("all"))
+
+        # Mouse wheel scrolling
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=5)
     
     # ============================================================================
     # DIRECTORIES TAB
@@ -379,7 +502,7 @@ class MASWInversionGUI:
         row += 1
 
         ttk.Label(scroll_frame, text="Project Information", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -407,20 +530,83 @@ class MASWInversionGUI:
         "\n     e.g. 1-18(Cx7p5)(Sx-2p5)(fn100)R.dc", "", row=row)
         row += 1
         
-        ttk.Label(scroll_frame, text="Overwrite Results:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(scroll_frame, text="Overwrite Results:",font=("Arial", 10, "bold")).grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(scroll_frame, variable=self.overwrite_var,
                     text="If unchecked, creates new timestamped folder in\nresults directory each time inversion is run").grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
         row += 1
 
-        ttk.Label(scroll_frame, text="Output plots (more options to be added here)", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+        ttk.Label(scroll_frame, text="Plotting", 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
-        self.figsize_w = self.add_spinbox(scroll_frame, "Figure Width:", 18, 5, 30, row=row)
+        # self.max_depth_spinbox = self.add_spinbox(scroll_frame, "Max depth (m):", 15, 1, 100, increment=0.1, row=row)
+        # row += 1
+
+        ttk.Label(scroll_frame, text="DC axes:", font=("Arial", 9)).grid(
+        row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(10, 0))
+        ttk.Label(scroll_frame, text="Min:                 Max:", font=("Arial", 9)).grid(
+        row=row, column=1, columnspan=2, sticky=tk.W, padx=5, pady=(10, 0))
         row += 1
-        self.figsize_h = self.add_spinbox(scroll_frame, "Figure Height:", 15, 5, 30, row=row)
+
+        ttk.Label(scroll_frame, text="Vr (m/s):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        dc_x_frame = ttk.Frame(scroll_frame)
+        dc_x_frame.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.models_dc_xmin = ttk.Spinbox(dc_x_frame, from_=0, to=10000, increment=50, width=8)
+        self.models_dc_xmin.set(0)
+        self.models_dc_xmin.pack(side=tk.LEFT, padx=(0, 5))
+        self.models_dc_xmax = ttk.Spinbox(dc_x_frame, from_=0, to=10000, increment=50, width=8)
+        self.models_dc_xmax.set(1000)
+        self.models_dc_xmax.pack(side=tk.LEFT)
+        row += 1
+
+        ttk.Label(scroll_frame, text="Pseudo-depth (m):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        dc_y_frame = ttk.Frame(scroll_frame)
+        dc_y_frame.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.models_dc_ymin = ttk.Spinbox(dc_y_frame, from_=0, to=10000, increment=1, width=8)
+        self.models_dc_ymin.set(0)
+        self.models_dc_ymin.pack(side=tk.LEFT, padx=(0, 5))
+        self.models_dc_ymax = ttk.Spinbox(dc_y_frame, from_=0, to=10000, increment=1, width=8)
+        self.models_dc_ymax.set(15)
+        self.models_dc_ymax.pack(side=tk.LEFT)
+        row += 1
+
+        ttk.Label(scroll_frame, text="Vs model axes:", font=("Arial", 9)).grid(
+        row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(10, 0))
+        ttk.Label(scroll_frame, text="Min:                 Max:", font=("Arial", 9)).grid(
+        row=row, column=1, columnspan=2, sticky=tk.W, padx=5, pady=(10, 0))
+        row += 1
+
+        ttk.Label(scroll_frame, text="Vs (m/s):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        mod_x_frame = ttk.Frame(scroll_frame)
+        mod_x_frame.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.models_mod_xmin = ttk.Spinbox(mod_x_frame, from_=0, to=10000, increment=50, width=8)
+        self.models_mod_xmin.set(0)
+        self.models_mod_xmin.pack(side=tk.LEFT, padx=(0, 5))
+        self.models_mod_xmax = ttk.Spinbox(mod_x_frame, from_=0, to=10000, increment=50, width=8)
+        self.models_mod_xmax.set(1000)
+        self.models_mod_xmax.pack(side=tk.LEFT)
+        row += 1
+
+        ttk.Label(scroll_frame, text="Depth (m/s):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        mod_y_frame = ttk.Frame(scroll_frame)
+        mod_y_frame.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.models_mod_ymin = ttk.Spinbox(mod_y_frame, from_=0, to=10000, increment=1, width=8)
+        self.models_mod_ymin.set(0)
+        self.models_mod_ymin.pack(side=tk.LEFT, padx=(0, 5))
+        self.models_mod_ymax = ttk.Spinbox(mod_y_frame, from_=0, to=10000, increment=1, width=8)
+        self.models_mod_ymax.set(15)
+        self.models_mod_ymax.pack(side=tk.LEFT)
+        row += 1
+
+        ttk.Label(scroll_frame, text="Output figure size", font=("Arial", 9)).grid(
+        row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(10, 0))
+        row += 1
+
+        self.figsize_w = self.add_spinbox(scroll_frame, "Width:", 18, 5, 30, row=row)
+        row += 1
+        self.figsize_h = self.add_spinbox(scroll_frame, "Height:", 15, 5, 30, row=row)
         row += 1
 
     # ============================================================================
@@ -436,18 +622,15 @@ class MASWInversionGUI:
         row = 0
 
         ttk.Label(scroll_frame, text="Create initial model", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
         ttk.Label(scroll_frame, text="By default, a constant velocity initial model is used to avoid adding any bias towards the initial model." \
                                     " \nNo. of layers (N) and layer thickness (h) are automatically determined using wavelength range of " \
                                     " \ninput dispersion curves and 1/3 wavelength sampling depth",
-                font=("Arial", 9)).grid(row=row, column=0, columnspan=2,
+                font=("Arial", 10)).grid(row=row, column=0, columnspan=2,
                 sticky=tk.W, padx=5, pady=(10, 5))
-        row += 1
-
-        self.max_depth_spinbox = self.add_spinbox(scroll_frame, "Max model depth (m):", 15, 1, 100, increment=0.1, row=row)
         row += 1
 
         self.auto_min_layers = self.add_spinbox(scroll_frame, "Minimum number of layers:", 3, 2, 20, row=row)
@@ -476,7 +659,7 @@ class MASWInversionGUI:
         row += 1
 
         ttk.Label(scroll_frame, text="Import from file", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -491,7 +674,7 @@ class MASWInversionGUI:
             row += 1
 
         ttk.Label(scroll_frame, text="Variable initial model velocity", 
-        font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+        font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
         sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
@@ -520,40 +703,46 @@ class MASWInversionGUI:
         row = 0
 
         ttk.Label(scroll_frame, text="Composite Dispersion Curve", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
-        ttk.Label(scroll_frame,  text="Before inversion, individual DCs are combined and resampled as a single composite DC for each" \
-                                    "line by calculating mean phase velocities and their distribution (std dev) within log(A)-spaced" \
+        ttk.Label(scroll_frame,  text="Before inversion, individual DCs are combined and resampled as a single composite DC for each " \
+                                    "line by calculating mean phase velocities and their distribution (std dev) within log(A)-spaced " \
                                     "wavelength bins.",
-                font=("Arial", 9, "bold"), wraplength=400).grid(row=row, column=0, columnspan=1, 
+                font=("Arial", 10, "bold"), wraplength=self.wrap_length).grid(row=row, column=0, columnspan=1, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
-        ttk.Label(scroll_frame, text="Increasing bin width (by decreasing A) gives a smoother composite DC (and vice versa)." \
-                                    "\n" \
-                                    "Intervals should be narrow enough to accurately capture phase velocity variations while" \
-                                    "ensuring that the number data points from individual DCsare still reasonably evenly distributed between bins" \
+        ttk.Label(scroll_frame, text="Increasing bin width (by decreasing A) gives a smoother composite DC (and vice versa). " \
+                                    "Intervals should be narrow enough to accurately capture phase velocity variations while " \
+                                    "ensuring that the number data points from individual DCsare still reasonably evenly distributed between bins " \
                                     "\n" \
                                     "\n" \
                                     "An uneven distribution of data points (caused by A being too high) creates a composite DC with  "
-                                    "very narrow std dev bounds within intervals containing too few data points.",
-                font=("Arial", 9),wraplength = self.wrap_length).grid(row=row, column=0, columnspan=1, 
+                                    "very narrow std dev bounds within intervals containing too few data points. ",
+                font=("Arial", 10),wraplength = self.wrap_length).grid(row=row, column=0, columnspan=1, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
-        ttk.Label(scroll_frame,      text="Per line, A should be set as high as possible without producing" \
-                                        "sharp pinches in std dev bounds. Values between 2 and 5 usually work well",
-                font=("Arial", 9, "bold"), wraplength=self.wrap_length).grid(row=row, column=0, columnspan=1, 
+        ttk.Label(scroll_frame,      text="TL/DR: Per line, A should be set as high as possible without producing " \
+                                        "sharp 'pinches' in std dev bounds. Values between 2 and 5 usually work well. ",
+                font=("Arial", 10, "bold"), wraplength=self.wrap_length).grid(row=row, column=0, columnspan=1, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
-        self.a_values = self.add_entry(scroll_frame, "A values for each line (comma-separated):", 2, row=row)
+        ttk.Label(scroll_frame, text="A values for each line (comma-separated):").grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(5, 0))
         row += 1
 
+        self.a_values = ttk.Entry(scroll_frame, width=40)
+        self.a_values.insert(0, "2")
+        self.a_values.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=(0, 5))
+        row += 1
+
+
         ttk.Label(scroll_frame, text="Line IDs and A values:" , 
-                font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -565,6 +754,9 @@ class MASWInversionGUI:
         ttk.Button(scroll_frame, text="Update", command=self.update_ids).grid(
             row=row, column=0, columnspan=1, sticky="EW", padx=10, pady=5)
         row += 1
+
+        ttk.Button(scroll_frame, text="Preview DCs", command=self.preview_dc).grid(
+            row=row, column=0, columnspan=1, sticky="EW", padx=10, pady=5)
 
     
     # ============================================================================
@@ -579,7 +771,7 @@ class MASWInversionGUI:
         
         row = 0
         ttk.Label(scroll_frame, text="Monte Carlo Inversion Parameters:", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -587,7 +779,7 @@ class MASWInversionGUI:
         "Iteration 1 applies random pertuabtions to the initial model\n" \
         "Further iterations apply random perturbations to the previous\n" \
         "iteration's model", 
-                font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -599,7 +791,7 @@ class MASWInversionGUI:
         ttk.Label(scroll_frame, text="Change the maximum random perturbation of model layer" \
         "\nthickness and Vs per iteration and number of iterations" \
         "\n to decay from max to min value." , 
-                font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
@@ -615,7 +807,7 @@ class MASWInversionGUI:
         row += 1        
         
         ttk.Label(scroll_frame, text="Forward Modelling (Vs Model to Vr DC)", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
@@ -639,10 +831,22 @@ class MASWInversionGUI:
         scroll_frame = self.make_scrollable_frame(frame)
         
         row = 0
+
         ttk.Label(scroll_frame, text="Limit velocity reversals", 
-                 font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
-                 sticky=tk.W, padx=5, pady=(10, 5))
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
+                sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
+
+        ttk.Label(scroll_frame, text="Force Monotonic:\n" \
+        "    Force modelled Vs to increase with depth").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.force_monotonic_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(scroll_frame, variable=self.force_monotonic_var).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+        row += 1
+        
+        self.monotonic_tol = self.add_spinbox(scroll_frame, "Monotonic Tolerance (m/s):" \
+        "\n     If Force Monotonic is enable, tolerate decrease in velocity between adjacent layers", 50, 0, 500, row=row)
+        row += 1
+
         
         self.rev_min_depth = self.add_entry(scroll_frame, "Min reversal Depth:", "None", row=row)
         row += 1
@@ -650,40 +854,46 @@ class MASWInversionGUI:
         row += 1
         self.max_retries = self.add_spinbox(scroll_frame, "Max Retries:", 200, 50, 500, row=row)
         row += 1
-        
-        ttk.Label(scroll_frame, text="Force Monotonic:\n" \
-        "    Force modelled Vs to increase with depth").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.force_monotonic_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(scroll_frame, variable=self.force_monotonic_var).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
-        row += 1
-        
-        self.monotonic_tol = self.add_spinbox(scroll_frame, "Monotonic Tolerance (m/s):" \
-        "\n     If Force Monotonic is enable, tolerate decrease in velocity between adjacent layers", 100, 0, 500, row=row)
-        row += 1
 
-        ttk.Label(scroll_frame, text="Misfit penalties", 
-                 font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
-                 sticky=tk.W, padx=5, pady=(10, 5))
-        row += 1
-        
-        self.uncert_bounds_weight = self.add_spinbox(scroll_frame, "Within Bounds Weight:", 20, 1, 100, row=row)
-        row += 1
-        self.rep_explore_weight = self.add_spinbox(scroll_frame, "Repulsion/Exploration Weight:", 0.2, 0.0, 1.0, row=row)
-        row += 1
-        
-        ttk.Label(scroll_frame, text="Regularistion", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+        ttk.Label(scroll_frame, text="Misfit and regularisation", 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
+        ttk.Label(scroll_frame, text="Adds additional penalty terms to the misfit function. Standard RMS misfit is used if all disabled (set to 0)."\
+                                    "\n"
+                                    "\nTechnical note if these are used: Because new terms have been added, the model fit is no longer described by the RMS misfit value alone."\
+                                    "Correct terminology TBC, instead of 'RMS misfit' the most general term is 'objective function', but 'weighted RMS misfit' mighe be appropriate.",
+                font=("Arial", 10, "bold"), wraplength=self.wrap_length).grid(row=row, column=0, columnspan=2, 
+                sticky=tk.W, padx=5, pady=(10, 5))
+        row += 1
+        
+        self.uncert_bounds_weight = self.add_spinbox(scroll_frame, "Within Bounds Penalty Weight:", 0, 0, 100, row=row)
+        row += 1
+        self.rep_explore_weight = self.add_spinbox(scroll_frame, "Model Similarity Penalty Weight:", 0.0, 0.0, 1.0, row=row)
+        row += 1
+        
+
         ttk.Label(scroll_frame, text="Use regularisation:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.regularisation = tk.BooleanVar(value=True)
+        self.regularisation = tk.BooleanVar(value=False)
         ttk.Checkbutton(scroll_frame, variable=self.regularisation).grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
 
         row += 1
         self.reg_weights = self.add_entry(scroll_frame, "Regularisation Weights:", "1e-7", row=row)
+        row += 1
         
-
+        ttk.Label(scroll_frame, text="Within bounds penalty is an additional penalty (squared difference in Vr) added if the modelled DC is outside the uncertainty bounds." \
+                                    "Useful if composite DC has uncertainty bounds and the inversion struggles to find models that fit within."\
+                                    "Before using: Check A values for composite DC, they may too large."\
+                                    "\n"\
+                                    "\nModel similarity penalty encourages exploration of the model space by penalising models based on their similarity " \
+                                    "to models from previous iterations of the same run. Encourages better sampling coverage and exploration of model space."\
+                                    "\n"\
+                                    "\nRegularisation applies a penalty based on the smoothness of the model. Higher weight = smoother model. " \
+                                    "Useful to mitigate very sharp jumps and unrealistic oscillation in velocity between adjacent layers."\
+                                    "Before using: This could be a symptom of overfitting, try reducing number of model layers ",
+                font=("Arial", 9), wraplength=self.wrap_length).grid(row=row, column=0, columnspan=2, 
+                sticky=tk.W, padx=5, pady=(10, 5))
 
 
     # ============================================================================
@@ -698,12 +908,12 @@ class MASWInversionGUI:
 
         row = 0
         ttk.Label(scroll_frame, text="Only useful in very specific circumstances, change at own risk",
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
         ttk.Label(scroll_frame, text="Repeat failed iterations", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -723,7 +933,7 @@ class MASWInversionGUI:
         row += 1
 
         ttk.Label(scroll_frame, text="Dispersion curves", 
-            font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+            font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
             sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
 
@@ -738,7 +948,7 @@ class MASWInversionGUI:
         row += 1
 
         ttk.Label(scroll_frame, text="In case of stalling misfit (requires further testing)", 
-                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
@@ -751,7 +961,7 @@ class MASWInversionGUI:
         row += 1
 
         ttk.Label(scroll_frame, text="Additional misfit contraints", 
-                font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, 
+                font=("Arial", 10, "bold")).grid(row=row, column=0, columnspan=2, 
                 sticky=tk.W, padx=5, pady=(10, 5))
         row += 1
         
@@ -813,16 +1023,13 @@ class MASWInversionGUI:
         else: 
             main_initial_file = "auto"
         
-        max_depth = int(self.max_depth_spinbox.get())
-        if max_depth <= 0:
-            raise ValueError("Max depth must be positive")
+        # max_depth = int(self.max_depth_spinbox.get())
+        # if max_depth <= 0:
+        #     raise ValueError("Max depth must be positive")
         
         n_initial = int(self.n_initial.get())
         if n_initial % 2 == 0:
             raise ValueError("Number of initial models must be odd")
-        
-        # Create data directory list for each line
-        data_dir_list = [os.path.join(main_data_dir, line) for line in lines]
         
         # Create results directories using the utility function approach
         overwrite_dir = self.overwrite_var.get()
@@ -833,23 +1040,18 @@ class MASWInversionGUI:
         self.config['working_dir'] = working_dir
         self.config['results_dir'] = results_dir
         self.config['main_data_dir'] = main_data_dir
-        self.config['data_dir_list'] = data_dir_list
         self.config['main_initial_file'] = main_initial_file
         self.config['ignore_files'] = [f.strip() for f in self.ignore_files_entry.get().split(',')] if self.ignore_files_entry.get().strip() else []
         self.config['overwrite_dir'] = overwrite_dir
-        self.config['max_depth'] = max_depth
         self.config['points_to_remove'] = None
         
         # Store processing settings in settings dictionary
         self.config['settings'] = {
             'figsize': (int(self.figsize_w.get()), int(self.figsize_h.get())),
-            'max_depth': max_depth,
             'pseudo_depth': True,
-            'dc_axis_limits': [(0, 1000), (0, max_depth)],
-            'models_axes_lims': [(0, 1000), (0, max_depth), (0, 1000), (0, max_depth)],
+            'axes_limits': [(0, 1000), (0, 15), (0, 1000), (0, 15)],
             'no_std': float(self.no_std.get()),
             'resample_n': int(self.resample_n.get()),
-            'resamp_max_pdepth': None,
             'dc_resamp_smoothing': self.dc_smooth_var.get(),
             'a_values': {line: int(v.strip()) for line, v in zip(lines, self.a_values.get().split(','))},
             'only_save_accepted': False,
@@ -895,7 +1097,11 @@ class MASWInversionGUI:
             'auto_rho': int(self.auto_const_rho.get()),
             'auto_Vp': int(self.auto_const_Vp.get()),
             'const_nu': float(self.auto_const_nu.get()),
-            'n_initial_models': int(self.n_initial.get())
+            'n_initial_models': int(self.n_initial.get()),
+            'axes_limits': [(int(self.models_dc_xmin.get()),  int(self.models_dc_xmax.get())),
+                                (int(self.models_dc_ymin.get()),  int(self.models_dc_ymax.get())),
+                                (int(self.models_mod_xmin.get()), int(self.models_mod_xmax.get())),
+                                (int(self.models_mod_ymin.get()), int(self.models_mod_ymax.get()))],
         }
 
     
@@ -1021,7 +1227,8 @@ class MASWInversionGUI:
         lines.append(f"  Ignore DC Files:      {', '.join(c['ignore_files']) if c['ignore_files'] else 'None'}")
         lines.append(f"  Overwrite Results:    {c['overwrite_dir']}")
         lines.append(f"  Figure Size:          {s['figsize'][0]} x {s['figsize'][1]}")
-        lines.append(f"  A Values:             {s['a_values']}")
+        lines.append(f"  Axis limits:          {s['axes_limits']}")
+
         lines.append("")
         lines.append("=" * 50)
         lines.append("  INITIAL MODEL")
@@ -1040,6 +1247,7 @@ class MASWInversionGUI:
         lines.append("=" * 50)
         lines.append("  DISPERSION CURVE")
         lines.append("=" * 50)
+        lines.append(f"  A Values:          {s['a_values']}")
         lines.append(f"  No. Stdev:         {s['no_std']}")
         lines.append(f"  C Test Min:        {s['c_test']['min']} m/s")
         lines.append(f"  C Test Max:        {s['c_test']['max']} m/s")
@@ -1051,7 +1259,6 @@ class MASWInversionGUI:
         lines.append("=" * 50)
         lines.append("  INVERSION CONTROL")
         lines.append("=" * 50)
-        lines.append(f"  Max Depth:         {s['max_depth']} m")
         lines.append(f"  No. of Runs:       {s['N_runs']}")
         lines.append(f"  Iter. per run:     {s['N_max']}")
         lines.append(f"  Repeat if Fail:    {s['repeat_run_if_fail']}")
@@ -1076,14 +1283,10 @@ class MASWInversionGUI:
         lines.append(f"  Rep Explore Wt:    {s['rep_explore_pen_weight']}")
         lines.append("")
         lines.append("=" * 50)
-        lines.append("  REGULARISATION")
+        lines.append("  CONSTRAINTS AND REGULARISATION")
         lines.append("=" * 50)
         lines.append(f"  Regularisation:    {s['regularisation']}")
         lines.append(f"  Reg Weights:       {s['regularisation_weights']}")
-        lines.append("")
-        lines.append("=" * 50)
-        lines.append("  MODEL CONSTRAINTS")
-        lines.append("=" * 50)
         lines.append(f"  Force Monotonic:   {s['force_monotonic']}")
         lines.append(f"  Monotonic Tol:     {s['monotonic_tol']}")
         lines.append(f"  Rev Min Depth:     {s['rev_min_depth']}")

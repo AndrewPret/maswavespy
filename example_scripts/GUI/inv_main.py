@@ -31,7 +31,6 @@ def MASW_inv_main(config):
         - main_initial_file: str - Path to initial velocity model file
         - ignore_files: list - List of filenames to ignore
         - overwrite_dir: bool - Whether to overwrite existing results
-        - max_depth: int - Maximum depth for visualization
         - points_to_remove: dict or None - Regions to remove from dispersion curves
         - settings: dict - All inversion settings
     
@@ -45,7 +44,7 @@ def MASW_inv_main(config):
     site = config['site']
     line_list = config['line_list']
     working_dir = config['working_dir']
-    data_dir_list = config['data_dir_list']
+    main_data_dir = config['main_data_dir'] 
     main_initial_file = config['main_initial_file']
     ignore_files = config['ignore_files']
     overwrite_dir = config['overwrite_dir']
@@ -69,6 +68,21 @@ def MASW_inv_main(config):
     config['results_dir'] = results_dir
     config['inversion_dir'] = inversion_dir
     config['initial_model_dir'] = initial_model_dir
+
+    # === Validate all line data directories exist before processing ===
+    missing = []
+    for line in line_list:
+        line_data_dir = os.path.join(main_data_dir, line)
+        if not os.path.isdir(line_data_dir):
+            missing.append(line)
+
+    if missing:
+        available = [d for d in os.listdir(main_data_dir) if os.path.isdir(os.path.join(main_data_dir, d))]
+        raise FileNotFoundError(
+            f"Data directories not found for lines: {', '.join(missing)}\n"
+            f"Expected in: {main_data_dir}\n"
+            f"Available directories: {available}"
+        )
     
     # ===== MAIN PROCESSING LOOP =====
     print("\n" + "-"*70)
@@ -82,7 +96,13 @@ def MASW_inv_main(config):
         start_time = time.time()
         
         # === 1. Get line-specific data directory ===
-        line_data_dir = data_dir_list[i]
+        line_data_dir = os.path.join(main_data_dir, line)
+        if not os.path.isdir(line_data_dir):
+            raise FileNotFoundError(
+                f"Data directory for line '{line}' not found.\n"
+                f"Expected: {line_data_dir}\n"
+                f"Available directories: {[d for d in os.listdir(main_data_dir) if os.path.isdir(os.path.join(main_data_dir, d))]}"
+            )
         
         # === 2. Import and Prepare Dispersion Curves ===
         print("  [1] Importing dispersion curves...")
@@ -285,80 +305,3 @@ def load_and_run_from_json(json_config_file):
     
     MASW_inv_main(config)
 
-
-# ============================================================================
-# EXAMPLE: How to call this function from the GUI
-# ============================================================================
-
-if __name__ == "__main__":
-    """
-    Example usage of MASW_inv_main with a sample config.
-    This would be called from the GUI like this:
-    
-    from masw_inversion_main import MASW_inv_main
-    MASW_inv_main(config)  # where config is the validated GUI config dict
-    """
-    
-    # Example config (this would come from the GUI)
-    example_config = {
-        'site': 'test',
-        'line_list': ['VR - 7'],
-        'working_dir': r'C:\maswavespy\working_dir_test',
-        'main_data_dir': r'C:\maswavespy\data_dir_test',
-        'data_dir_list': [r'C:\maswavespy\data_dir_test\VR - 7'],
-        'main_initial_file': r'C:\maswavespy\working_dir_test\initial_models\initial_model_const_vel.csv',
-        'ignore_files': [],
-        'overwrite_dir': False,
-        'points_to_remove': None,
-        'max_depth': 15,
-        'settings': {
-            'figsize': (18, 15),
-            'max_depth': 15,
-            'pseudo_depth': True,
-            'dc_axis_limits': [(0, 1000), (0, 15)],
-            'models_axes_lims': [(0, 1000), (0, 15), (0, 1000), (0, 15)],
-            'no_std': 1,
-            'resample_n': 30,
-            'resamp_max_pdepth': None,
-            'dc_resamp_smoothing': True,
-            'a_values': {'VR - 7': 2},
-            'only_save_accepted': False,
-            'c_test': {'min': 100, 'max': 1100, 'step': 0.2, 'delta_c': 3},
-            'N_runs': 10,
-            'N_max': 100,
-            'repeat_run_if_fail': False,
-            'run_success_minimum': 0,
-            'bs': 20,
-            'bh': 10,
-            'bs_min': 4,
-            'bh_min': 2,
-            'b_decay_iterations': 200,
-            'bs_min_halfspace': None,
-            'N_stall_max': 0,
-            'st_lt_window': (200, 1000),
-            'misfit_mode': 'average',
-            'uncertainty_weighting': False,
-            'depth_weight_offset_const': 0,
-            'plot_misfit_weights': False,
-            'within_bounds_thresh': 1,
-            'regularisation': 'model',
-            'regularisation_ranges': None,
-            'uncert_bounds_misfit_weight': 20,
-            'rep_explore_pen_weight': 0.2,
-            'regularisation_weights': [1e-7],
-            'rev_min_depth': None,
-            'rev_max_depth': None,
-            'rev_min_layer': None,
-            'rev_max_layer': None,
-            'max_retries': 200,
-            'force_monotonic': False,
-            'monotonic_tol': 100,
-            'vel_shift': 150,
-            'n_initial_models': 5,
-            'new_run_prev_best_fit': False,
-            'runs_initial': 1
-        }
-    }
-    
-    # Uncomment to run with example config:
-    # MASW_inv_main(example_config)

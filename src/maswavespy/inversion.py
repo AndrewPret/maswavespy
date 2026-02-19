@@ -241,6 +241,8 @@ class InvertDC():
         self.max_bounds_pen = 1
         self.max_diversity_pen = 1
 
+        self.max_depth = self.settings['axes_limits'][3][1]
+
 
         # All sampled profiles.
         self.profiles = {
@@ -614,11 +616,15 @@ class InvertDC():
         
         """
 
-        max_depth = self.settings['max_depth']
         c_test = self.settings['c_test']
         figwidth = self.settings['figsize'][0]
         figheight = self.settings['figsize'][1]
         pseudo_depth = self.settings['pseudo_depth']
+        axis_limits = self.settings['axes_limits']
+        Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
+        Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
 
         # Testing range for Rayleigh wave phase velocity [m/s]
         c_vec = np.arange(c_test['min'], c_test['max'], c_test['step'], dtype = np.float64)
@@ -657,7 +663,7 @@ class InvertDC():
                 s.round_down_to_nearest(min(min(c_t), min(self.c_obs_low)) - 10, 20),
                 s.round_up_to_nearest(max(max(c_t), max(self.c_obs_up)) + 10, 20),
             )
-            ax[0].set_ylim(0, max_depth)
+            ax[0].set_ylim(Vr_y_lim[0], Vr_y_lim[1])
             ax[0].invert_yaxis()
 
             ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
@@ -666,7 +672,7 @@ class InvertDC():
                 s.round_down_to_nearest(min(initial['beta']) - 10, 20),
                 s.round_up_to_nearest(max(initial['beta']) + 10, 20),
             )
-            ax[1].set_ylim(0, max_depth)
+            ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
             ax[1].invert_yaxis()
 
         # Plot theoretical dispersion curve
@@ -674,7 +680,7 @@ class InvertDC():
 
         # Plot shear wave velocity profile
         beta_plot = self._beta_profile(initial['beta'])
-        z_plot = self._h_to_z_profile(initial['h'], max_depth)
+        z_plot = self._h_to_z_profile(initial['h'], self.max_depth)
         ax[1].plot(beta_plot, z_plot, c=col, label='Initial Vs profile')
         ax[1].scatter(beta_plot[:-1], z_plot[:-1], marker='_', s=30, c='k', zorder=5, label='Layer interfaces')
 
@@ -1606,11 +1612,10 @@ class InvertDC():
             If no sampled profiles exist.         
         """
     
-        max_depth = self.settings['max_depth']
         figwidth = self.settings['figsize'][0]
         figheight = self.settings['figsize'][1]
         pseudo_depth = self.settings['pseudo_depth']
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
 
         if not bool(self.profiles.get('n_layers')):
             message = 'No sampled profiles exist. The dictionary ´profiles´ contains None values.' 
@@ -1675,7 +1680,7 @@ class InvertDC():
         
         # Plot shear wave velocity profiles
         beta_plot = self._beta_profile(beta_sort)
-        z_plot = self._h_to_z_profile(h_sort, max_depth)
+        z_plot = self._h_to_z_profile(h_sort, self.max_depth)
         s.plot_lines(beta_plot, z_plot, list(range(no_profiles)), ax=ax[1], cmap=col_map, lw=0.4)  
         
         # Axes labels and limits 
@@ -1687,8 +1692,8 @@ class InvertDC():
         else:
             ax[1].set_xlim(s.round_down_to_nearest(np.min(c_sort) - 10, 20),
                         s.round_up_to_nearest(np.max(c_sort) + 10, 20))
-            ax[0].set_ylim(max_depth, 0)
-            ax[1].set_ylim(0, max_depth)
+            ax[0].set_ylim(self.max_depth, 0)
+            ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
         ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
         ax[1].set_ylabel('Depth [m]', fontweight='bold')
                 
@@ -1864,13 +1869,16 @@ class InvertDC():
         ----------------
         All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
         """
-        max_depth = self.settings['max_depth']
+
         c_test = self.settings['c_test']
         figsize = self.settings['figsize']
         pseudo_depth = self.settings['pseudo_depth']
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
         Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
         Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
+
 
 
         # Get shear wave velocity profiles whose theoretical dispersion curves fall within bounds
@@ -1941,7 +1949,7 @@ class InvertDC():
 
         # Plot shear wave velocity profiles
         beta_plot = self._beta_profile(self.selected['beta'])
-        z_plot = self._h_to_z_profile(self.selected['h'], max_depth)
+        z_plot = self._h_to_z_profile(self.selected['h'], self.max_depth)
         
         # Reformat lists of coordinates and create a LineCollection 
         coordinates = [np.column_stack([x, y]) for x, y in zip(beta_plot, z_plot)]
@@ -1955,7 +1963,7 @@ class InvertDC():
 
         # Plot shear median wave velocity profile (central values)
         beta_plot_median = self._beta_profile(beta)
-        z_plot_median = self._z_profile(z, max_depth)
+        z_plot_median = self._z_profile(z, self.max_depth)
         ax[1].plot(beta_plot_median, z_plot_median, color=col, label='Median profile')
 
 
@@ -1968,10 +1976,10 @@ class InvertDC():
             ax[0].set_ylim(0, s.round_up_to_nearest(max(y_vals), 5))
             ax[0].set_yscale('linear')
 
-        ax[0].set_ylim(0, max_depth)
+        ax[0].set_ylim(Vr_y_lim[0], Vr_y_lim[1])
         ax[0].invert_yaxis()
         
-        ax[1].set_ylim(0, max_depth)
+        ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
         ax[1].invert_yaxis()
 
         if show_all:
@@ -2002,7 +2010,7 @@ class InvertDC():
                         barsabove=True, ls='none', fmt='.', capsize=3)
 
             # Horizontal error bars for Vs
-            z_temp = [0] + [z[i] for i in range(n)] + [max(max_depth, z[-1])]
+            z_temp = [0] + [z[i] for i in range(n)] + [max(self.max_depth, z[-1])]
             beta_error_ydata = [0.5 * (z_temp[i] + z_temp[i + 1]) for i in range(n + 1)]
             beta_error_up = [profile['beta_up'][i] - beta[i] for i in range(n + 1)]
             beta_error_low = [beta[i] - profile['beta_low'][i] for i in range(n + 1)]
@@ -2070,11 +2078,15 @@ class InvertDC():
         ----------------
         All other keyword arguments are passed on to matplotlib.collections.LineCollection. 
         """
-        max_depth = self.settings['max_depth']
+
         figwidth = self.settings['figsize'][0]
         figheight = self.settings['figsize'][1]
         pseudo_depth = self.settings['pseudo_depth']
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
+        Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
+        Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
 
         # Get shear wave velocity profiles whose theoretical dispersion curves fall within bounds
         if self.settings['only_save_accepted'] == False:
@@ -2111,7 +2123,7 @@ class InvertDC():
 
         # Plot shear wave velocity profiles
         beta_plot = self._beta_profile(self.selected['beta'])
-        z_plot = self._h_to_z_profile(self.selected['h'], max_depth)
+        z_plot = self._h_to_z_profile(self.selected['h'], self.max_depth)
         s.plot_lines(beta_plot, z_plot, list(range(no_within)), ax=ax[1], cmap=col_map, lw=0.4, **kwargs)
 
         # Figure appearance
@@ -2124,7 +2136,7 @@ class InvertDC():
             ax[0].set_yscale('linear')
 
         ax[0].invert_yaxis()
-        ax[1].set_ylim(0, max_depth)
+        ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
         ax[1].invert_yaxis()
 
         if show_all:
@@ -2431,10 +2443,13 @@ class InvertDC():
         """
 
         c_test = self.settings['c_test']
-        max_depth = self.settings['max_depth']
         figwidth = self.settings['figsize'][0]
         figheight = self.settings['figsize'][1]
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
+        Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
+        Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
 
         # Model parameters
         beta = profile['beta']
@@ -2482,7 +2497,7 @@ class InvertDC():
             else:
                 ax[1].set_xlim(s.round_down_to_nearest(min(beta) - 10, 20),
                             s.round_up_to_nearest(max(beta) + 10, 20))
-            ax[1].set_ylim(0, max_depth)
+            ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
             ax[1].invert_yaxis()
 
         # Plot theoretical dispersion curve using pseudodepth
@@ -2490,7 +2505,7 @@ class InvertDC():
 
         # Plot shear wave velocity profile (central values)
         beta_plot = self._beta_profile(beta)
-        z_plot = self._z_profile(z, max_depth)
+        z_plot = self._z_profile(z, self.max_depth)
         ax[1].plot(beta_plot, z_plot, c=col)
 
         if up_low:
@@ -2502,7 +2517,7 @@ class InvertDC():
                         barsabove=True, ls='none', fmt='.', capsize=3)
 
             # Horizontal error bars for Vs
-            z_temp = [0] + [z[i] for i in range(n)] + [max(max_depth, z[-1])]
+            z_temp = [0] + [z[i] for i in range(n)] + [max(self.max_depth, z[-1])]
             beta_error_ydata = [0.5 * (z_temp[i] + z_temp[i + 1]) for i in range(n + 1)]
             beta_error_up = [profile['beta_up'][i] - beta[i] for i in range(n + 1)]
             beta_error_low = [beta[i] - profile['beta_low'][i] for i in range(n + 1)]
@@ -2610,11 +2625,12 @@ class InvertDC():
         """
 
         c_test = self.settings['c_test']
-        max_depth = self.settings['max_depth']
         figsize = self.settings['figsize']
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
         Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
         Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
 
         # Model parameters
         beta = profile['beta']
@@ -2662,10 +2678,10 @@ class InvertDC():
             else:
                 ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
                 
-            ax[0].set_ylim(0, max_depth)
+            ax[0].set_ylim(Vr_y_lim[0], Vr_y_lim[1])
             ax[0].invert_yaxis()
             
-            ax[1].set_ylim(0, max_depth)
+            ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
             ax[1].invert_yaxis()
 
         # Plot theoretical dispersion curve using pseudodepth
@@ -2673,7 +2689,7 @@ class InvertDC():
 
         # Plot shear wave velocity profile (central values)
         beta_plot = self._beta_profile(beta)
-        z_plot = self._z_profile(z, max_depth)
+        z_plot = self._z_profile(z, self.max_depth)
         ax[1].plot(beta_plot, z_plot, c=col)
 
         if up_low:
@@ -2685,7 +2701,7 @@ class InvertDC():
                         barsabove=True, ls='none', fmt='.', capsize=3)
 
             # Horizontal error bars for Vs
-            z_temp = [0] + [z[i] for i in range(n)] + [max(max_depth, z[-1])]
+            z_temp = [0] + [z[i] for i in range(n)] + [max(self.max_depth, z[-1])]
             beta_error_ydata = [0.5 * (z_temp[i] + z_temp[i + 1]) for i in range(n + 1)]
             beta_error_up = [profile['beta_up'][i] - beta[i] for i in range(n + 1)]
             beta_error_low = [beta[i] - profile['beta_low'][i] for i in range(n + 1)]
@@ -2778,11 +2794,11 @@ class InvertDC():
             The associated wavelengths are stored in profile.wavelength.
         """
         c_test = self.settings['c_test']
-        max_depth = self.settings['max_depth']
-        figsize = self.settings['figsize']
-        axis_limits = self.settings['models_axes_lims']
+        axis_limits = self.settings['axes_limits']
         Vr_x_lim = axis_limits[0]
+        Vr_y_lim = axis_limits[1]
         Vs_x_lim = axis_limits[2]
+        Vs_y_lim = axis_limits[3]
 
         # Model parameters
         beta = profile['beta']
@@ -2817,7 +2833,7 @@ class InvertDC():
         ax[0].set_xlabel('Rayleigh wave velocity [m/s]', fontweight='bold')
         ax[0].set_ylabel('Pseudodepth (1/3 wavelength) [m]', fontweight='bold')
         ax[0].set_xlim(Vr_x_lim[0], Vr_x_lim[1])
-        ax[0].set_ylim(0, max_depth)
+        ax[0].set_ylim(Vr_y_lim[0], Vr_y_lim[1])
         ax[0].invert_yaxis()
 
         ax[1].set_xlabel('Shear wave velocity [m/s]', fontweight='bold')
@@ -2828,7 +2844,7 @@ class InvertDC():
             ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
         else:
             ax[1].set_xlim(Vs_x_lim[0], Vs_x_lim[1])
-        ax[1].set_ylim(0, max_depth)
+        ax[1].set_ylim(Vs_y_lim[0], Vs_y_lim[1])
         ax[1].invert_yaxis()
 
         # Plot theoretical dispersion curve using pseudodepth
@@ -2836,7 +2852,7 @@ class InvertDC():
 
         # Plot shear wave velocity profile (central values)
         beta_plot = self._beta_profile(beta)
-        z_plot = self._z_profile(z, max_depth)
+        z_plot = self._z_profile(z, self.max_depth)
         ax[1].plot(beta_plot, z_plot, c=col, linewidth=2, alpha=1)
 
         if up_low:
@@ -2848,7 +2864,7 @@ class InvertDC():
                         barsabove=True, ls='none', fmt='.', capsize=3, 
                         elinewidth=1, alpha=0.6, label='_nolegend_')
             # Horizontal error bars for Vs
-            z_temp = [0] + [z[i] for i in range(n)] + [max(max_depth, z[-1])]
+            z_temp = [0] + [z[i] for i in range(n)] + [max(self.max_depth, z[-1])]
             beta_error_ydata = [0.5 * (z_temp[i] + z_temp[i + 1]) for i in range(n + 1)]
             beta_error_up = [profile['beta_up'][i] - beta[i] for i in range(n + 1)]
             beta_error_low = [beta[i] - profile['beta_low'][i] for i in range(n + 1)]
