@@ -39,7 +39,7 @@ def results_directories(working_dir, overwrite_dir, site):
 
     return results_dir, inversion_dir, initial_model_dir
 
-def data_import(line, line_data_dir, line_inv_dir=None, points_to_remove=None, ignore_files=None):
+def data_import(line, line_data_dir, line_inv_dir=None, points_to_remove=None, ignore_files=None,f_min=None, f_max=None):
     """ function to import .dc file picks and convert them into correct format for MASWavesPy"""
     file_pattern = os.path.join(line_data_dir, "*.dc") 
     file_list_full = sorted(glob.glob(file_pattern))
@@ -53,11 +53,11 @@ def data_import(line, line_data_dir, line_inv_dir=None, points_to_remove=None, i
 
     for file in file_list:
         f, c = load_SWPicker_DC(file)
-        if points_to_remove:
-            line_boxes = points_to_remove.get(line, [])
-            f, c = remove_points_in_boxes(f, c, line_boxes)
-            global_boxes = points_to_remove.get('ALL', [])
-            f, c = remove_points_in_boxes(f, c, global_boxes)
+        # if points_to_remove:
+        #     line_boxes = points_to_remove.get(line, [])
+        #     f, c = remove_points_in_boxes(f, c, line_boxes)
+        #     global_boxes = points_to_remove.get('ALL', [])
+        #     f, c = remove_points_in_boxes(f, c, global_boxes)
         f_combined.append(f)
         c_combined.append(c)
 
@@ -68,7 +68,24 @@ def data_import(line, line_data_dir, line_inv_dir=None, points_to_remove=None, i
     f_vec = [np.array(f) for f in f_combined]
     c_vec = [np.array(c) for c in c_combined]
 
+    if f_min is not None or f_max is not None:
+        f_vec, c_vec = filter_dc_by_frequency(f_vec, c_vec, f_min, f_max)
+
     return f_vec, c_vec
+
+def filter_dc_by_frequency(f_vec, c_vec, f_min=None, f_max=None):
+    """Remove points outside frequency range from all DC picks."""
+    f_filtered = []
+    c_filtered = []
+    for f, c in zip(f_vec, c_vec):
+        mask = np.ones(len(f), dtype=bool)
+        if f_min is not None:
+            mask &= f >= f_min
+        if f_max is not None:
+            mask &= f <= f_max
+        f_filtered.append(f[mask])
+        c_filtered.append(c[mask])
+    return f_filtered, c_filtered
 
 def dc_resamp_and_plot(line, combDC_obj, dc_freq_file=None, dc_wl_file=None, dc_resamp_file=None):
 
@@ -774,7 +791,7 @@ def save_results_csv(line_list, inversion_dir):
 
         inv_obj = pickle.load(open(rf"{inversion_dir}\inversion_obj_{line}.pkl", 'rb'))
         initial = pickle.load(open(rf"{inversion_dir}\initial_model_{line}.pkl", 'rb'))
-        inv_obj.within_boundaries(runs='all', threshold=within_bounds_threshold)
+        inv_obj.within_boundaries(runs='all')
         median_profile = inv_obj.median_profile(q=[10,90], dataset='selected')
 
         # --- Measured DC ---

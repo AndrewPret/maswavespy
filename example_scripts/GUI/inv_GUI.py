@@ -51,7 +51,7 @@ class MASWInversionGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("MASW Inversion - Configuration Manager")
-        self.root.geometry("700x800")
+        self.root.geometry("700x900")
 
         # # Custom icon
         # icon = tk.PhotoImage(file="icon-16.png")
@@ -166,6 +166,8 @@ class MASWInversionGUI:
             "models_mod_xmax": self.models_mod_xmax,
             "models_mod_ymin": self.models_mod_ymin,
             "models_mod_ymax": self.models_mod_ymax,
+            "f_min": self.f_min_entry,
+            "f_max": self.f_max_entry,
         }
 
     def _get_checkvar_map(self):
@@ -413,7 +415,7 @@ class MASWInversionGUI:
             settings = config['settings']
             line_data_dir = os.path.join(config['main_data_dir'], line)
             
-            f_vec, c_vec = data_import(line, line_data_dir)
+            f_vec, c_vec = data_import(line, line_data_dir,f_min=settings.get('f_min'),f_max=settings.get('f_max'))
             
             pre_combDC_obj = CombineDCs(config['site'], line, settings, freq=f_vec, c=c_vec)
 
@@ -753,6 +755,31 @@ class MASWInversionGUI:
 
         ttk.Button(scroll_frame, text="Update", command=self.update_ids).grid(
             row=row, column=0, columnspan=1, sticky="EW", padx=10, pady=5)
+        row += 1
+
+        ttk.Label(scroll_frame, text="Remove picks by frequency :", 
+          font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, 
+          sticky=tk.W, padx=5, pady=(10, 0))
+        row += 1
+
+        ttk.Label(scroll_frame, text="Min frequency (Hz):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        row += 1
+        f_min_frame = ttk.Frame(scroll_frame)
+        f_min_frame.grid(row=row, column=0, sticky=tk.EW, padx=5, pady=2)
+        self.f_min_var = tk.StringVar(value="None")
+        self.f_min_entry = ttk.Entry(f_min_frame, textvariable=self.f_min_var, width=10)
+        self.f_min_entry.pack(side=tk.LEFT)
+        ttk.Label(f_min_frame, text='  (enter "None" to disable)').pack(side=tk.LEFT)
+        row += 1
+
+        ttk.Label(scroll_frame, text="     Max frequency (Hz):").grid(row=row, column=0, sticky=tk.W, padx=5)
+        row += 1
+        f_max_frame = ttk.Frame(scroll_frame)
+        f_max_frame.grid(row=row, column=0, sticky=tk.EW, padx=5, pady=2)
+        self.f_max_var = tk.StringVar(value="None")
+        self.f_max_entry = ttk.Entry(f_max_frame, textvariable=self.f_max_var, width=10)
+        self.f_max_entry.pack(side=tk.LEFT)
+        ttk.Label(f_max_frame, text='  (enter "None" to disable)').pack(side=tk.LEFT)
         row += 1
 
         ttk.Button(scroll_frame, text="Preview DCs", command=self.preview_dc).grid(
@@ -1102,6 +1129,8 @@ class MASWInversionGUI:
                                 (int(self.models_dc_ymin.get()),  int(self.models_dc_ymax.get())),
                                 (int(self.models_mod_xmin.get()), int(self.models_mod_xmax.get())),
                                 (int(self.models_mod_ymin.get()), int(self.models_mod_ymax.get()))],
+            'f_min': self._parse_optional(self.f_min_var.get()),
+            'f_max': self._parse_optional(self.f_max_var.get()),
         }
 
     

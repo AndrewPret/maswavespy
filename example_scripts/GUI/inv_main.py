@@ -108,8 +108,10 @@ def MASW_inv_main(config):
         print("  [1] Importing dispersion curves...")
         f_vec, c_vec = zutil.data_import(
             line, line_data_dir, inversion_dir, 
-            points_to_remove, ignore_files
-        )
+            points_to_remove, ignore_files,
+            f_min=settings.get('f_min'),
+            f_max=settings.get('f_max'))
+        
         
         combDC_obj = combination.CombineDCs(
             site, line, settings, freq=f_vec, c=c_vec

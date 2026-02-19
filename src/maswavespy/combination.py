@@ -161,6 +161,8 @@ class CombineDCs():
         self.c = self._to_array(c)
         self.wavelengths = self.c/self.freq
 
+        # trim frequencies
+
         # smoothing for resampled dispersion curve
         self.smoothing = settings['dc_resamp_smoothing']
         
